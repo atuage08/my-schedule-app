@@ -4,13 +4,13 @@
 
 ## 検証とGitHub Pages向けビルド
 
-Node.js 22以上（推奨24）で、プロジェクト内から実行します。インストール工程は不要です。
+Node.js 22以上（推奨24）で、プロジェクト内から実行します。ソースの検査・ビルドはWindowsまたはLinuxに対応します。Windowsでは標準のWindows PowerShellと.NETを使用します。追加パッケージのインストールは不要です。
 
 ```sh
 node scripts/check.mjs
 node --test test/*.test.js
 node scripts/build.mjs
-# 公開対象は dist/ の6ファイルのみ
+# 公開対象は dist/ の7ファイルのみ
 ```
 
 今後のiPhone試験はGitHub PagesのHTTPS URLを使用する方針です。現時点では公開していないため、iPhone向けURLはありません。家庭内LAN接続は使用せず、ファイアウォール設定も変更しません。必要な場合だけ `node server.mjs` でビルド済みdistをPC内の `http://127.0.0.1:4173/` に表示できます。サーバーはLANへバインドしません。
@@ -21,6 +21,7 @@ CSSとJSの相対参照により、ルート直下でも `/my-schedule-app/` の
 
 - `src/model.js`: ローカル日付、時刻の初期値、繰り返し、整合性検証、完了処理。UIに依存しません。
 - `src/app.js`: 画面構成、入力パネル、保存操作。ブラウザ標準APIだけを使用。
+- `src/dom.js`: 許可したタグ・属性だけで要素を生成。名称・検索文字列はテキストノードやvalueとして設定し、HTMLとして解釈しません。
 - `styles.css`: 色、レイアウト、iPhone safe area、入力パネル。UI評価後に差し替え可能。
 - `test/model.test.js`: 日付境界・基本登録条件・完了・繰り越し・保存形式の自動テスト。
 - `.github/workflows/`: 自動テストとCodeQLの設定。GitHubへ接続後に実行されます。
@@ -28,6 +29,8 @@ CSSとJSの相対参照により、ルート直下でも `/my-schedule-app/` の
 - `scripts/check.mjs`: ソース構文と秘密情報・連絡先らしい文字列の簡易検査。
 - `test/build.test.js`: 公開パス、配信内容、ビルド失敗時の保護、共有対象の除外。
 - `scripts/review-zip.ps1`: レビュー用ZIPの作成・全エントリーのハッシュ検証。
+- `scripts/secure-source.mjs` / `scripts/windows-source-worker.ps1`: ハンドルを基点とするリンク非追従のソース読み込み・列挙。通常ファイルのみ、1ファイル8MiB以下に限定。
+- `test/dom-security.test.js` / `test/files-security.test.js`: HTML文字列、異常パス、ハードリンク、シンボリックリンク／ジャンクション、親ディレクトリ差し替えの回帰テスト。
 
 ## 実装仕様
 
@@ -55,7 +58,7 @@ CSSとJSの相対参照により、ルート直下でも `/my-schedule-app/` の
 
 保存先はlocalStorageの `my-schedule.prototype.v1` のみ。ほかのキーを読み書きせず、`localStorage.clear()` も使用しません。読み込み時と保存前に形式と日時の整合性を検証します。読み込み失敗時は元データを上書きせず保存を停止し、書き込み失敗時はメモリー上の変更を戻します。保存失敗は画面に表示します。別タブからの変更はstorageイベントで再読込しますが、複数タブ間の完全なトランザクション制御はありません。
 
-CSPで通信先を禁止し、外部画像・フォント・計測・APIは使用しません。名称はHTMLエスケープします。保存データは暗号化していません。実データを入れず架空データで試してください。
+CSPで通信先を禁止し、外部画像・フォント・計測・APIは使用しません。画面はDOM APIで生成し、名称・保存データ・DOMから読み戻した値をHTMLとして再解釈しません。保存データは暗号化していません。実データを入れず架空データで試してください。
 
 **公開前の条件:** 同じ `ユーザー名.github.io` 配下のパス違いは同じオリジンです。専用保存キーは衝突を防ぎますが、同一オリジンのスクリプトからの隔離にはなりません。正式運用は専用ドメイン／サブドメイン等でオリジンを分離し、認証・バックアップ方針も別途検討してください。
 
@@ -63,27 +66,28 @@ CSPで通信先を禁止し、外部画像・フォント・計測・APIは使�
 
 専用リポジトリは [atuage08/my-schedule-app](https://github.com/atuage08/my-schedule-app) です。mainには初期READMEだけを置き、試作品コードは `prototype/phase-1` からPRで検査します。試作品コードのmainへのマージとPages公開は別途判断します。既存アプリのリポジトリやPages設定には接続しません。
 
-`Prototype checks` は手動実行・PR・対象ブランチのpushで、Asia/TokyoとUTCそれぞれのソース検査・テスト・ビルドを行います。distの検査用成果物を7日間保存しますが、デプロイ権限や公開処理はありません。PRのChecksで実際の結果を確認してください。必要な必須検査設定とレビューの後に、公開手順を別途追加します。
+`Prototype checks` は手動実行・PR・対象ブランチのpushで、Windows・UbuntuそれぞれのAsia/TokyoとUTCでソース検査・テスト・ビルドを行う設定です。distの検査用成果物を7日間保存しますが、デプロイ権限や公開処理はありません。PRのChecksで実際の結果を確認してください。必要な必須検査設定とレビューの後に、公開手順を別途追加します。
 
 CodeQL設定は [GitHub公式資料](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options) に基づきます。リポジトリの可視性・契約によってCodeQLの利用条件が変わるため、接続後に実行結果を確認してください。現在は公開ワークフローを自動実行しません。
 
-保存領域の共有リスクと専用オリジンの提案は [Pages準備・分離設計](docs/pages-preparation.md)、最新の結果は [第2回レビュー対応結果](docs/review2-fixes-report.md) を参照してください。[PR本文の下書き](docs/pr-draft.md) も用意しています。
+保存領域の共有リスクと専用オリジンの提案は [Pages準備・分離設計](docs/pages-preparation.md)、最新の修正は [CodeQL警告への対応](docs/codeql-fixes-report.md) を参照してください。[PR本文の下書き](docs/pr-draft.md) も用意しています。
 
 ## 独立レビュー用ZIP
 
 WindowsのPowerShellで実行します。Node.jsと.NET標準機能のみを使います。
 
 ```powershell
-pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-r3.zip
+pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-r4-codeql.zip
 ```
 
-出力は `artifacts/my-schedule-source-review-r3.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIP作成前に簡易スキャン、作成後に各エントリーの内容検証を行います。検査は未知の秘密情報を完全に検出する保証ではなく、今回の対象ファイルは内容も確認しています。
+出力は `artifacts/my-schedule-source-review-r4-codeql.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
 
 ## 未実装・要実機評価
 
 - ChatGPT連携、Apple通知、カレンダー連携、アカウント、サーバー同期、PWAオフライン対応。
 - iPhone Safariでの片手操作、キーボード表示中の保存ボタン位置、24時間・1分入力の確認。
 - ブラウザ操作テストは `scripts/browser-smoke.mjs` に再利用可能な関数を用意し、ブラウザ操作ツールで28項目を確認済み。GitHub CIでのブラウザテスト実行環境は未導入。
+- `scripts/browser-security.mjs` で不正HTML・特殊文字の再描画・保存・編集・削除確認を25項目確認済み。
 - GitHubへの接続、実際のPR作成、CodeQL実行、検査後の公開。
 
 外部連携は未実装であることを画面にも明示しています。将来の連携は `model.js` の状態を扱う専用アダプターを追加する方針で、現段階では認証情報・権限・外部呼び出しを含めていません。

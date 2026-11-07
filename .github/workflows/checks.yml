@@ -8,9 +8,10 @@ permissions:
   contents: read
 jobs:
   test-and-build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest, windows-latest]
         timezone: [Asia/Tokyo, UTC]
     env:
       TZ: ${{ matrix.timezone }}
@@ -25,7 +26,7 @@ jobs:
       # Preparation only. No deploy-pages action, Pages environment or write permissions.
       - uses: actions/upload-artifact@v4
         with:
-          name: pages-preview-${{ matrix.timezone == 'UTC' && 'utc' || 'tokyo' }}
+          name: pages-preview-${{ matrix.os }}-${{ matrix.timezone == 'UTC' && 'utc' || 'tokyo' }}
           path: dist/
           include-hidden-files: true
           if-no-files-found: error

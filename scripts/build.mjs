@@ -1,15 +1,18 @@
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { PROJECT_ROOT, PUBLIC_FILES, readSource } from './files.mjs';
 
 export async function buildSite(projectRoot = PROJECT_ROOT) {
-  const root = await realpath(projectRoot);
-  const config = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  const root = resolve(projectRoot);
+  const config = JSON.parse((await readSource(root,'package.json')).toString('utf8'));
   if (config.name !== 'my-schedule-prototype') throw Error('This is not the My Schedule project');
   // Read every input before replacing a previous artifact.
-  const sources = await Promise.all(PUBLIC_FILES.map(async name => [name, await readSource(root, name)]));
+  // Wait for every protected read (and its handle cleanup), even after an input fails.
+  const results=await Promise.allSettled(PUBLIC_FILES.map(async name=>[name,await readSource(root,name)]));
+  for(const result of results)if(result.status==='rejected')throw result.reason;
+  const sources=results.map(result=>result.value);
   for (const [name, contents] of sources) if (name.endsWith('.js')) {
     const result=spawnSync(process.execPath,['--input-type=module','--check'],{input:contents,encoding:'utf8'});
     if(result.status!==0)throw Error(`Build refused invalid JavaScript: ${name}`);

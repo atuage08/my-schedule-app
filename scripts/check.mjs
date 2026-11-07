@@ -24,7 +24,7 @@ export async function checkSources(root = PROJECT_ROOT) {
     const text = (await readSource(root, name)).toString('utf8');
     for (const category of screenText(text)) findings.push(`${name}: ${category}`);
     if (/\.(?:m?js)$/.test(name)) {
-      const result = spawnSync(process.execPath, ['--check', resolve(root, name)], { encoding: 'utf8' });
+      const result = spawnSync(process.execPath, ['--check','--input-type=module'], {input:text,encoding:'utf8'});
       if (result.status !== 0) throw Error(`Syntax check failed: ${name}\n${result.stderr}`);
     }
   }

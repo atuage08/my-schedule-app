@@ -1,5 +1,7 @@
 # 第2回独立レビューへの対応（r3）
 
+これはCodeQL警告対応前の記録です。最新の安全性修正と検証は `docs/codeql-fixes-report.md` を参照してください。
+
 対象は `my-schedule-app`、作業ブランチは `prototype/phase-1` のままです。既存の未コミット変更を維持し、今回の修正も未コミットで保持します。karada-log-appへの操作、GitHubへのpush、mainへのマージ、Pages公開は行っていません。
 
 ## 実際の変更

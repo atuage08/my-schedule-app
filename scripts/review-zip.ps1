@@ -7,10 +7,11 @@ if (Test-Path -LiteralPath $outputDirectory) {
         throw 'Refusing a linked artifacts directory'
     }
 }
-$manifestLines = & node (Join-Path $PSScriptRoot 'review-manifest.mjs')
+$manifestLines = & node (Join-Path $PSScriptRoot 'review-manifest.mjs') --with-content
 if ($LASTEXITCODE -ne 0) { throw 'Source screening failed; archive was not created' }
 $manifestText = $manifestLines -join "`n"
 $manifest = $manifestText | ConvertFrom-Json
+$manifestText = @{ format=$manifest.format; project=$manifest.project; files=@($manifest.files | Select-Object path,bytes,sha256) } | ConvertTo-Json -Depth 5
 [IO.Directory]::CreateDirectory($outputDirectory) | Out-Null
 $archivePath = Join-Path $outputDirectory $ArchiveName
 Add-Type -AssemblyName System.IO.Compression
@@ -21,7 +22,8 @@ try {
         foreach ($file in $manifest.files) {
             $sourcePath = [IO.Path]::GetFullPath((Join-Path $projectRoot $file.path))
             if (-not $sourcePath.StartsWith($projectRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Path escapes project' }
-            $bytes = [IO.File]::ReadAllBytes($sourcePath)
+            # Consume the protected descriptor snapshot; never reopen the pathname.
+            $bytes = [Convert]::FromBase64String($file.contentBase64)
             $sha = [Security.Cryptography.SHA256]::Create()
             try { $hash = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
             if ($hash -ne $file.sha256) { throw "Source changed during packaging: $($file.path)" }

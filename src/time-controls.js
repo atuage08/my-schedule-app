@@ -38,7 +38,10 @@ export function enhanceTimeFields(form) {
       const minutes = Array.from({length: precise ? 60 : 6}, (_, i) => i * (precise ? 1 : 10));
       if (!minutes.includes(current)) minutes.push(current);
       minutes.sort((a, b) => a - b);
-      minute.innerHTML = minutes.map(n => `<option value="${padded(n)}">${padded(n)}分</option>`).join('');
+      minute.replaceChildren(...minutes.map(n=>{
+        const option=document.createElement('option');
+        option.value=padded(n);option.textContent=padded(n)+'分';return option;
+      }));
       minute.value = padded(current);
     };
     const change = () => {
