@@ -1,5 +1,5 @@
 import {enhanceTimeFields} from './time-controls.js';
-import {STORAGE_KEY,dateKey,localDate,addDays,defaults,shiftEnd,validateState,validateItem,rollTasks,complete,eventOn,seed,nextDate} from './model.js';
+import {newId,STORAGE_KEY,dateKey,localDate,addDays,defaults,shiftEnd,validateState,validateItem,rollTasks,complete,eventOn,seed,nextDate} from './model.js';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(d,options={month:'long',day:'numeric',weekday:'short'})=>localDate(d).toLocaleDateString('ja-JP',options);
 const repeatLabel={none:'繰り返さない',daily:'毎日',weekly:'毎週',monthly:'毎月'};
@@ -49,7 +49,7 @@ function bind(){
  if($('#all-history'))$('#all-history').onchange=e=>{showAllHistory=e.target.checked;render();};
 }
 function openEditor(original=null,occurrence=null){
- const dialog=$('#editor');let type=original?.type||'event',data=original?structuredClone(original):{id:crypto.randomUUID(),title:'',...defaults(selected),allDay:false,due:null,pinned:false,repeat:'none',excluded:[]};
+ const dialog=$('#editor');let type=original?.type||'event',data=original?structuredClone(original):{id:newId(),title:'',...defaults(selected),allDay:false,due:null,pinned:false,repeat:'none',excluded:[]};
  if(original?.type==='event'&&occurrence){const current=eventOn(original,selected);if(current){data.start=current.start;data.end=current.end;}}
  function draw(){dialog.innerHTML=`<form id="entry-form"><div class="sheet-handle"></div><div class="sheet-heading"><h2 id="editor-title">${original?'編集':'新しく追加'}</h2><button type="button" class="close" id="close" aria-label="閉じる">×</button></div><label class="title-input"><span>名称</span><input name="title" maxlength="160" required placeholder="${type==='event'?'どんな予定？':'やることをひとつ'}" value="${esc(data.title)}" autocomplete="off"></label><div class="entry-fields">${type==='event'?`<label class="toggle-row">終日<input name="allDay" type="checkbox" ${data.allDay?'checked':''}></label><label>開始<input name="start" type="${data.allDay?'date':'datetime-local'}" value="${data.allDay?data.start.slice(0,10):data.start}" step="${data.allDay?1:600}" required></label><label>終了<input name="end" type="${data.allDay?'date':'datetime-local'}" value="${data.allDay?addDays(data.end.slice(0,10),data.end.slice(11)==='00:00'?-1:0):data.end}" step="${data.allDay?1:600}" required></label><p class="hint">${data.allDay?'終了日を含みます':'24時間表記 · 通常は10分単位'}</p>`:`<label>期限 <span class="optional">任意</span><input name="due" type="date" value="${data.due||''}"></label><p class="hint">名称だけでも保存できます。期限なしは「いつかやる」へ。</p>`}<details><summary>詳細設定</summary><label>繰り返し<select name="repeat">${Object.entries(repeatLabel).map(([key,label])=>`<option value="${key}" ${data.repeat===key?'selected':''}>${label}</option>`).join('')}</select></label>${type==='event'?'<label class="toggle-row">1分単位で入力<input type="checkbox" id="minute-step"></label>':''}<p class="hint">毎月は同じ日。該当日がない月は月末です。</p></details>${original?.repeat!=='none'&&original?'<label>繰り返しの変更範囲<select name="scope"><option value="one">今回だけ</option><option value="all">すべて</option></select></label>':''}<p id="form-error" class="error" role="alert"></p></div><div class="sheet-bottom">${!original?`<div class="segment type-switch"><button type="button" data-type="event" aria-pressed="${type==='event'}">予定</button><button type="button" data-type="task" aria-pressed="${type==='task'}">タスク</button></div>`:''}<button class="save" type="submit">${original?'変更を保存':'保存する'} <span>✓</span></button>${original?'<button type="button" class="delete" id="delete">この項目を削除</button>':''}</div></form>`;
  const form=$('#entry-form');
@@ -67,7 +67,7 @@ function openEditor(original=null,occurrence=null){
  if($('#delete'))$('#delete').onclick=()=>{if(mutate(applyRemoval)){dialog.close();render();notify('削除しました');}};
  form.onsubmit=e=>{e.preventDefault();try{capture();let item={...data,type,title:data.title.trim(),anchorDay:Number((type==='event'?data.start:data.due||selected).slice(8,10))};validateItem(item);
  const one=original&&original.repeat!=='none'&&scope()==='one';
- if(one){item={...item,id:crypto.randomUUID(),repeat:'none',excluded:[]};}
+ if(one){item={...item,id:newId(),repeat:'none',excluded:[]};}
  else if(original?.repeat!=='none'&&original&&type==='event'&&occurrence){const days=Math.round((localDate(item.start.slice(0,10))-localDate(occurrence))/86400000);const start=addDays(original.start.slice(0,10),days)+item.start.slice(10);item.end=shiftEnd(item.start,item.end,start);item.start=start;item.anchorDay=Number(start.slice(8,10));}
  if(mutate(()=>{if(one){applyRemoval();state.items.push(item);}else{state.items=state.items.filter(x=>x.id!==item.id);state.items.push(item);}rollTasks(state);})){dialog.close();render();notify('保存しました');}
  }catch(error){$('#form-error').textContent=error.message;}};

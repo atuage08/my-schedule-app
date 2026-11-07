@@ -20,4 +20,5 @@ jobs:
           node-version: '24'
       - run: node --check src/app.js
       - run: node --check src/model.js
+      - run: node --check src/time-controls.js
       - run: node --test

@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {dateKey,addDays,defaults,shiftEnd,nextDate,validateState,validateItem,rollTasks,complete,eventOn,seed} from '../src/model.js';
+import {newId,dateKey,addDays,defaults,shiftEnd,nextDate,validateState,validateItem,rollTasks,complete,eventOn,seed} from '../src/model.js';
 const task=(changes={})=>({id:'t',title:'架空タスク',type:'task',due:null,pinned:false,repeat:'none',excluded:[],...changes});
 const event=(changes={})=>({id:'e',title:'架空予定',type:'event',start:'2026-11-07T12:00',end:'2026-11-07T13:00',allDay:false,repeat:'none',excluded:[],...changes});
 const state=(items=[])=>({version:1,items,history:[]});
+test('LAN HTTP ID fallback works without randomUUID',()=>{
+  const insecureCrypto={getRandomValues:crypto.getRandomValues.bind(crypto)};
+  const ids=Array.from({length:100},()=>newId(insecureCrypto));
+  assert.equal(new Set(ids).size,100);
+  assert.ok(ids.every(id=>/^[0-9a-f]{32}$/.test(id)));
+});
 test('today rounds up ten minutes and preserves one-hour duration',()=>{assert.deepEqual(defaults('2026-11-07',new Date(2026,10,7,12,3)),{start:'2026-11-07T12:10',end:'2026-11-07T13:10'});});
 test('exact ten-minute boundary stays; seconds cause rounding',()=>{assert.equal(defaults('2026-11-07',new Date(2026,10,7,12,10)).start,'2026-11-07T12:10');assert.equal(defaults('2026-11-07',new Date(2026,10,7,12,10,1)).start,'2026-11-07T12:20');});
 test('other day defaults to noon',()=>{assert.equal(defaults('2026-12-03',new Date(2026,10,7)).start,'2026-12-03T12:00');});

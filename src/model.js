@@ -1,4 +1,10 @@
 export const STORAGE_KEY = 'my-schedule.prototype.v1';
+// randomUUID requires HTTPS in Safari; getRandomValues also works on LAN HTTP.
+export function newId(cryptoApi=globalThis.crypto) {
+  if(typeof cryptoApi.randomUUID==='function')return cryptoApi.randomUUID();
+  const bytes=cryptoApi.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+}
 export const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 export const localDate = key => new Date(key+'T12:00:00');
 export function addDays(key,n) { const d=localDate(key);d.setDate(d.getDate()+n);return dateKey(d); }
@@ -46,7 +52,7 @@ export function rollTasks(state,today=dateKey()) {
 }
 export function complete(state,id,now=new Date()) {
   const t=state.items.find(x=>x.id===id);if(!t||t.type!=='task')return;
-  state.history.push({id:crypto.randomUUID(),title:t.title,due:t.due,completedAt:now.toISOString()});
+  state.history.push({id:newId(),title:t.title,due:t.due,completedAt:now.toISOString()});
   if(t.repeat==='none')state.items=state.items.filter(x=>x.id!==id);
   else {t.due=nextDate(t.due,t.repeat,t.anchorDay);rollTasks(state,dateKey(now));}
 }
