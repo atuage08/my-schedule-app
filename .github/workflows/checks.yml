@@ -1,0 +1,23 @@
+name: Prototype checks
+on:
+  pull_request:
+  push:
+    branches: [main, 'prototype/**']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        timezone: [Asia/Tokyo, UTC]
+    env:
+      TZ: ${{ matrix.timezone }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: node --check src/app.js
+      - run: node --check src/model.js
+      - run: node --test
