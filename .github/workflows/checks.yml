@@ -1,12 +1,13 @@
 name: Prototype checks
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main, 'prototype/**']
 permissions:
   contents: read
 jobs:
-  test:
+  test-and-build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -18,7 +19,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - run: node --check src/app.js
-      - run: node --check src/model.js
-      - run: node --check src/time-controls.js
-      - run: node --test
+      - run: node scripts/check.mjs
+      - run: node --test test/*.test.js
+      - run: node scripts/build.mjs
+      # Preparation only. No deploy-pages action, Pages environment or write permissions.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pages-preview-${{ matrix.timezone == 'UTC' && 'utc' || 'tokyo' }}
+          path: dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

@@ -1,4 +1,5 @@
-// Explicit 24-hour selects keep the time display independent of the OS clock format.
+import { MIN_DATE, MAX_DATE } from './model.js';
+// Hours use direct numeric input; minutes remain a compact selector.
 const padded = n => String(n).padStart(2, '0');
 
 export function enhanceTimeFields(form) {
@@ -11,11 +12,18 @@ export function enhanceTimeFields(form) {
     group.className = 'date-time-control';
     const date = document.createElement('input');
     date.type = 'date';
+    date.min = MIN_DATE;
+    date.max = MAX_DATE;
     date.required = true;
     date.setAttribute('aria-label', label + '日');
-    const hour = document.createElement('select');
+    const hour = document.createElement('input');
+    hour.type = 'number';
+    hour.min = '0';
+    hour.max = '23';
+    hour.step = '1';
+    hour.required = true;
+    hour.inputMode = 'numeric';
     hour.setAttribute('aria-label', label + '時（24時間）');
-    hour.innerHTML = Array.from({length: 24}, (_, n) => `<option value="${padded(n)}">${padded(n)}時</option>`).join('');
     const minute = document.createElement('select');
     minute.setAttribute('aria-label', label + '分');
     source.type = 'hidden';
@@ -25,7 +33,7 @@ export function enhanceTimeFields(form) {
     const refresh = () => {
       const value = source.value;
       date.value = value.slice(0, 10);
-      hour.value = value.slice(11, 13);
+      hour.value = String(Number(value.slice(11, 13)));
       const current = Number(value.slice(-2));
       const minutes = Array.from({length: precise ? 60 : 6}, (_, i) => i * (precise ? 1 : 10));
       if (!minutes.includes(current)) minutes.push(current);
@@ -34,11 +42,13 @@ export function enhanceTimeFields(form) {
       minute.value = padded(current);
     };
     const change = () => {
-      source.value = date.value + 'T' + hour.value + ':' + minute.value;
+      if (!date.validity.valid || !hour.validity.valid) return;
+      source.value = date.value + 'T' + padded(Number(hour.value)) + ':' + minute.value;
       source.onchange?.();
       controls.forEach(update => update());
     };
     for (const control of [date, hour, minute]) control.onchange = change;
+    hour.oninput = change;
     controls.push(refresh);
     refresh();
   }
