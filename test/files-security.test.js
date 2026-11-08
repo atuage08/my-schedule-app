@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,symlink,link,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,lstat,symlink,link,rm} from 'node:fs/promises';
 import {join,dirname,basename,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {Worker} from 'node:worker_threads';
 import {readSource,reviewFiles} from '../scripts/files.mjs';
 import {protectedSource,MAX_SOURCE_BYTES} from '../scripts/secure-source.mjs';
+import {raceSession} from './fixtures/race-session.js';
 
 async function fixture(t){
   const base=await mkdtemp(join(tmpdir(),'my-schedule-security-'));
@@ -47,28 +48,51 @@ test('leaf symlinks are rejected when the OS permits their creation',async t=>{
   await assert.rejects(readSource(root,'leaf.txt'));
 });
 test('concurrent parent replacement never reads an outside source',async t=>{
-  const {base,root}=await fixture(t);const worker=new Worker(new URL('./fixtures/fs-race.js',import.meta.url),{workerData:{base}});
-  let resolveReady,rejectReady,resolveDone,rejectDone,result,readySeen=false;
-  const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
-  const done=new Promise((resolve,reject)=>{resolveDone=resolve;rejectDone=reject;});
-  // Attach handlers before the first read, including worker failure/early exit.
-  ready.catch(()=>{});done.catch(()=>{});
-  worker.on('message',message=>{if(message.type==='ready'){readySeen=true;resolveReady();}else if(message.type==='result')result=message;});
-  worker.on('error',error=>{rejectReady(error);rejectDone(error);});
-  worker.on('exit',code=>{
-    if(code!==0||!readySeen||!result?.restored){const error=Error('Race worker failed before restoring its workspace');rejectReady(error);rejectDone(error);}
-    else resolveDone(result);
-  });
-  let successes=0,failures=0;
+  const {base,root,outside}=await fixture(t);
+  const original=await lstat(join(root,'sub'),{bigint:true});
+  const worker=new Worker(new URL('./fixtures/fs-race.js',import.meta.url),{workerData:{base}});
+  const session=raceSession(worker);let reads=0,linkedRounds=0,result;
+  async function inspect(){
+    reads++;
+    try{return {bytes:await readSource(root,'sub/source.txt')};}
+    catch(error){return {error};}
+  }
+  function trustedOrRefused(outcome){
+    if(outcome.bytes)assert.equal(outcome.bytes.toString(),'trusted source');
+    else assert.ok(outcome.error instanceof Error);
+  }
   try{
-    await ready;
-    for(let i=0;i<60;i++){
-      try{const bytes=await readSource(root,'sub/source.txt');assert.equal(bytes.toString(),'trusted source');successes++;}
-      catch(error){if(error.code==='ERR_ASSERTION')throw error;failures++;}
+    for(let round=0;round<10;round++){
+      // Fully create the junction away from the read path before allowing reads.
+      await session.exchange('arm','armed',round);
+      // Round zero requires a real replacement before any read starts. Later
+      // rounds overlap reads and attacks; Windows may block the replacement.
+      const inFlight=round===0?[]:Array.from({length:3},inspect);
+      let outcomes,prepared;
+      try{
+        prepared=await session.exchange('attack','prepared',round);
+        const during=Array.from({length:round===0?6:3},inspect);
+        const settled=await Promise.all([...inFlight,...during]);
+        outcomes={settled,during:settled.slice(inFlight.length)};
+      }finally{
+        await Promise.all(inFlight);
+        if(prepared)await session.exchange('release','restored',round);
+      }
+      // Assert only after cleanup so a failed assertion cannot strand a worker
+      // at its release barrier or cause fixture removal during restoration.
+      outcomes.settled.forEach(trustedOrRefused);
+      assert.ok(prepared.linked||prepared.blocked,'attack must link or be blocked by the OS');
+      if(round===0)assert.equal(prepared.linked,true,'a real replacement is mandatory');
+      if(prepared.linked){linkedRounds++;for(const outcome of outcomes.during)assert.ok(outcome.error,'reads while the attack link is held must be refused');}
     }
-  }finally{worker.postMessage({type:'stop'});await done;}
-  assert.ok(successes+failures===60);assert.ok(result.swaps>0,'race must actually replace the parent');
-  assert.equal(result.restored,true);
+    result=await session.finish();
+  }finally{await session.dispose();}
+  assert.equal(reads,60);assert.equal(result.swaps,linkedRounds);assert.ok(result.swaps>0);
+  assert.equal(result.rounds,10);assert.equal(result.restored,true);
+  const restored=await lstat(join(root,'sub'),{bigint:true});
+  assert.equal(restored.isSymbolicLink(),false);assert.equal(restored.dev,original.dev);assert.equal(restored.ino,original.ino);
+  for(const path of [join(root,'parked'),join(base,'attack-link')])await assert.rejects(lstat(path),error=>error.code==='ENOENT');
+  assert.equal(await readFile(join(outside,'source.txt'),'utf8'),'outside fixture');
   assert.equal((await readSource(root,'sub/source.txt')).toString(),'trusted source');
 });
 test('the source adapter contains no path-based stat-then-read fallback',async()=>{

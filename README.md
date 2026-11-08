@@ -70,17 +70,17 @@ CSPで通信先を禁止し、外部画像・フォント・計測・APIは使�
 
 CodeQL設定は [GitHub公式資料](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options) に基づきます。リポジトリの可視性・契約によってCodeQLの利用条件が変わるため、接続後に実行結果を確認してください。現在は公開ワークフローを自動実行しません。
 
-保存領域の共有リスクと専用オリジンの提案は [Pages準備・分離設計](docs/pages-preparation.md)、最新の修正は [Windows CI失敗への対応](docs/windows-ci-fixes-report.md)、前回の修正は [CodeQL警告への対応](docs/codeql-fixes-report.md) を参照してください。[PR本文の下書き](docs/pr-draft.md) も用意しています。
+保存領域の共有リスクと専用オリジンの提案は [Pages準備・分離設計](docs/pages-preparation.md)、最新の修正は [差し替え競合テストの安定化](docs/windows-race-stability-report.md)、過去の修正は [Windows CI失敗への対応](docs/windows-ci-fixes-report.md) と [CodeQL警告への対応](docs/codeql-fixes-report.md) を参照してください。[PR本文の下書き](docs/pr-draft.md) も用意しています。
 
 ## 独立レビュー用ZIP
 
 WindowsのPowerShellで実行します。Node.jsと.NET標準機能のみを使います。
 
 ```powershell
-pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-r5-windows-ci.zip
+pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-r6-race-stability.zip
 ```
 
-出力は `artifacts/my-schedule-source-review-r5-windows-ci.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
+出力は `artifacts/my-schedule-source-review-r6-race-stability.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
 
 ## 未実装・要実機評価
 

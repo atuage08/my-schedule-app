@@ -14,17 +14,27 @@ export async function retryLocked(operation,{maxAttempts=40,delayMs=5,wait=sleep
   }
 }
 
-export async function raceRound({paths,ops,hold=sleep,onLinked=()=>{},onAttackBlocked=()=>{},onCleanupRetry=()=>{},retry={}}){
-  let moved=false,linked=false;
+export async function raceRound({paths,ops,hold=sleep,onArmed=async()=>{},onLinked=()=>{},onAttackBlocked=()=>{},beforeCleanup=async()=>{},onCleanupRetry=()=>{},retry={}}){
+  // Windows junction creation is multi-step (mkdir, open, set reparse point).
+  // Prepare it away from the reader before any concurrent reads start. Only
+  // rename complete entries into the attacked pathname, never partial stubs.
+  await ops.symlink(paths.outside,paths.staged,process.platform==='win32'?'junction':'dir');
+  let moved=false,linked=false,staged=true;
   try{
+    await onArmed();
     await ops.rename(paths.normal,paths.parked);moved=true;
-    await ops.symlink(paths.outside,paths.normal,process.platform==='win32'?'junction':'dir');linked=true;
+    await ops.rename(paths.staged,paths.normal);linked=true;staged=false;
     onLinked();await hold(2);
   }catch(error){if(!isLockError(error))throw error;onAttackBlocked(error);}
   finally{
+    // Drain in-flight reads before restoration; repeated reads can otherwise
+    // keep Windows rename locked for the entire retry budget.
+    await beforeCleanup();
     const options={...retry,onRetry:onCleanupRetry};
-    // Never follow or recursively remove the attack link. Restore in order.
-    if(linked)await retryLocked(()=>ops.unlink(paths.normal),options);
+    // Move the complete link out before restoring the original directory.
+    // Never follow or recursively remove a link or an unexpected directory.
+    if(linked){await retryLocked(()=>ops.rename(paths.normal,paths.staged),options);staged=true;}
     if(moved)await retryLocked(()=>ops.rename(paths.parked,paths.normal),options);
+    if(staged)await retryLocked(()=>ops.unlink(paths.staged),options);
   }
 }
