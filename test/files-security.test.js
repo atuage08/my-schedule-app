@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,symlink,link,rm} from 'node:fs/promises';
 import {join,dirname,basename,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
-import {once} from 'node:events';
 import {Worker} from 'node:worker_threads';
 import {readSource,reviewFiles} from '../scripts/files.mjs';
 import {protectedSource,MAX_SOURCE_BYTES} from '../scripts/secure-source.mjs';
@@ -49,16 +48,27 @@ test('leaf symlinks are rejected when the OS permits their creation',async t=>{
 });
 test('concurrent parent replacement never reads an outside source',async t=>{
   const {base,root}=await fixture(t);const worker=new Worker(new URL('./fixtures/fs-race.js',import.meta.url),{workerData:{base}});
-  await once(worker,'message');
+  let resolveReady,rejectReady,resolveDone,rejectDone,result,readySeen=false;
+  const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
+  const done=new Promise((resolve,reject)=>{resolveDone=resolve;rejectDone=reject;});
+  // Attach handlers before the first read, including worker failure/early exit.
+  ready.catch(()=>{});done.catch(()=>{});
+  worker.on('message',message=>{if(message.type==='ready'){readySeen=true;resolveReady();}else if(message.type==='result')result=message;});
+  worker.on('error',error=>{rejectReady(error);rejectDone(error);});
+  worker.on('exit',code=>{
+    if(code!==0||!readySeen||!result?.restored){const error=Error('Race worker failed before restoring its workspace');rejectReady(error);rejectDone(error);}
+    else resolveDone(result);
+  });
   let successes=0,failures=0;
   try{
+    await ready;
     for(let i=0;i<60;i++){
       try{const bytes=await readSource(root,'sub/source.txt');assert.equal(bytes.toString(),'trusted source');successes++;}
       catch(error){if(error.code==='ERR_ASSERTION')throw error;failures++;}
     }
-  }finally{worker.postMessage('stop');}
-  const [result]=await once(worker,'message');await once(worker,'exit');
+  }finally{worker.postMessage({type:'stop'});await done;}
   assert.ok(successes+failures===60);assert.ok(result.swaps>0,'race must actually replace the parent');
+  assert.equal(result.restored,true);
   assert.equal((await readSource(root,'sub/source.txt')).toString(),'trusted source');
 });
 test('the source adapter contains no path-based stat-then-read fallback',async()=>{

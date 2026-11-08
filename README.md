@@ -70,17 +70,17 @@ CSPで通信先を禁止し、外部画像・フォント・計測・APIは使�
 
 CodeQL設定は [GitHub公式資料](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options) に基づきます。リポジトリの可視性・契約によってCodeQLの利用条件が変わるため、接続後に実行結果を確認してください。現在は公開ワークフローを自動実行しません。
 
-保存領域の共有リスクと専用オリジンの提案は [Pages準備・分離設計](docs/pages-preparation.md)、最新の修正は [CodeQL警告への対応](docs/codeql-fixes-report.md) を参照してください。[PR本文の下書き](docs/pr-draft.md) も用意しています。
+保存領域の共有リスクと専用オリジンの提案は [Pages準備・分離設計](docs/pages-preparation.md)、最新の修正は [Windows CI失敗への対応](docs/windows-ci-fixes-report.md)、前回の修正は [CodeQL警告への対応](docs/codeql-fixes-report.md) を参照してください。[PR本文の下書き](docs/pr-draft.md) も用意しています。
 
 ## 独立レビュー用ZIP
 
 WindowsのPowerShellで実行します。Node.jsと.NET標準機能のみを使います。
 
 ```powershell
-pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-r4-codeql.zip
+pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-r5-windows-ci.zip
 ```
 
-出力は `artifacts/my-schedule-source-review-r4-codeql.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
+出力は `artifacts/my-schedule-source-review-r5-windows-ci.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
 
 ## 未実装・要実機評価
 
@@ -88,6 +88,6 @@ pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-rev
 - iPhone Safariでの片手操作、キーボード表示中の保存ボタン位置、24時間・1分入力の確認。
 - ブラウザ操作テストは `scripts/browser-smoke.mjs` に再利用可能な関数を用意し、ブラウザ操作ツールで28項目を確認済み。GitHub CIでのブラウザテスト実行環境は未導入。
 - `scripts/browser-security.mjs` で不正HTML・特殊文字の再描画・保存・編集・削除確認を25項目確認済み。
-- GitHubへの接続、実際のPR作成、CodeQL実行、検査後の公開。
+- 今回の修正のGitHub Actions・CodeQL再検査、検査後の公開。PR #1は作成済みです。
 
 外部連携は未実装であることを画面にも明示しています。将来の連携は `model.js` の状態を扱う専用アダプターを追加する方針で、現段階では認証情報・権限・外部呼び出しを含めていません。

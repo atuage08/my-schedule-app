@@ -2,7 +2,7 @@
 
 ## レビュー対象
 
-個人向け「マイスケジュール」の第1段階試作品です。CodeQLのHigh警告2件に対応したr4版です。ファイルの検査後にパスを開き直す処理と、DOM由来文字列をHTMLへ戻す処理を修正しています。データはすべて架空で、外部API・通知・同期は未実装です。
+個人向け「マイスケジュール」の第1段階試作品です。CodeQL対応後のWindows CI失敗を修正したr5版です。出力先の実体照合と、競合テストのWindowsロック処理を修正しています。データはすべて架空で、外部API・通知・同期は未実装です。
 
 このZIPにはソース、スタイル、テスト、ビルド／検査スクリプト、GitHub Actions設定、文書を含めています。node_modules、.git、dist、画像、保存データ、ZIP自身、認証情報・環境設定は含めていません。Git作者・リモート・会話ログも含めません。`REVIEW-MANIFEST.json` に各ファイルのSHA-256があります。
 
@@ -26,11 +26,11 @@ node scripts/build.mjs
 4. Pagesのリポジトリ配下パスでの参照解決、配信・ZIP対象の限定、Actions権限。
 5. iPhoneのキーボード、フォームのラベル、片手操作、文字サイズとコントラスト。
 
-Nodeテストは95件（既存77件を維持＋新規18件）です。今回のWindows環境ではAsia/Tokyo・UTCとも94件成功、失敗0、ファイルシンボリックリンク作成権限がない1件はスキップしました。ジャンクション・ハードリンク・親の差し替え競合は実行して成功しています。Linux側の実行はローカル未確認で、CIにWindowsとUbuntuの両方を追加しました。
+Nodeテストは106件（既存95件を維持＋新規11件）です。今回のWindows環境ではAsia/Tokyo・UTCとも105件成功、失敗0、既存のファイルシンボリックリンク作成権限がない1件はスキップしました。ジャンクション・ハードリンク・親の差し替え競合は実行して成功しています。競合テストは追加で5回実行しすべて成功しました。今回の変更のLinux側の実行はローカル未確認です。CIにはWindowsとUbuntuの両方を設定しています。
 
 ブラウザ操作ツールのTab APIを受け取る関数 `runBrowserSmoke(tab)` は28項目、`runBrowserSecurity(tab)` は不正HTML・特殊文字の25項目が成功しています。単独Node実行ではブラウザを起動しません。モジュールはそれぞれ `scripts/browser-smoke.mjs` と `scripts/browser-security.mjs` です。127.0.0.1の試作品で架空データを使用し、自分で作った未完了項目だけを削除します。保存領域へテストから直接書き込みません。GitHub CIのブラウザ実行環境は未導入です。
 
-最新の変更・互換性の制限は `docs/codeql-fixes-report.md`、入力・保存件数の上限と探索方式は `docs/review-fixes-report.md` を参照してください。確認前のpushを行っていないため、修正後のGitHub CodeQL再実行はまだです。実際のPagesでの読込、iPhone/Safari実機評価も未実施です。
+最新の変更・検証の制限は `docs/windows-ci-fixes-report.md`、前回のCodeQL修正は `docs/codeql-fixes-report.md`、入力・保存件数の上限と探索方式は `docs/review-fixes-report.md` を参照してください。今回の修正はpushしていないため、GitHub Actions・CodeQL再実行はまだです。実際のPagesでの読込、iPhone/Safari実機評価も未実施です。
 
 同一Pagesホストの別パスは保存領域のセキュリティ境界になりません。詳細と提案は `docs/pages-preparation.md` を参照してください。
 
