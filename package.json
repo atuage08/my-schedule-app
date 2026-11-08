@@ -1,0 +1,13 @@
+{
+  "name": "my-schedule-prototype",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "node server.mjs"
+  },
+  "engines": { "node": ">=22" }
+}
