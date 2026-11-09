@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,lstat,symlink,link,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,lstat,symlink,link,unlink,rm} from 'node:fs/promises';
 import {join,dirname,basename,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {Worker} from 'node:worker_threads';
 import {readSource,reviewFiles} from '../scripts/files.mjs';
 import {protectedSource,MAX_SOURCE_BYTES} from '../scripts/secure-source.mjs';
 import {raceSession} from './fixtures/race-session.js';
+import {createTestLink} from './fixtures/link-capability.js';
 
 async function fixture(t){
   const base=await mkdtemp(join(tmpdir(),'my-schedule-security-'));
@@ -30,25 +31,27 @@ test('directories and oversized sources cannot be read as regular source files',
   await writeFile(join(root,'large.bin'),Buffer.alloc(MAX_SOURCE_BYTES+1));await assert.rejects(readSource(root,'large.bin'));
 });
 test('hard links to an outside file are rejected without exposing its bytes',async t=>{
-  const {root,outside}=await fixture(t);await link(join(outside,'source.txt'),join(root,'hard.txt'));
+  const {root,outside}=await fixture(t);if(!await createTestLink(t,()=>link(join(outside,'source.txt'),join(root,'hard.txt')),{kind:'hard link'}))return;
   await assert.rejects(readSource(root,'hard.txt'));
 });
 test('parent directory links/junctions cannot escape the project',async t=>{
-  const {root,outside}=await fixture(t);await symlink(outside,join(root,'linked'),process.platform==='win32'?'junction':'dir');
+  const {root,outside}=await fixture(t);if(!await createTestLink(t,()=>symlink(outside,join(root,'linked'),process.platform==='win32'?'junction':'dir'),{kind:'parent junction/symlink'}))return;
   await assert.rejects(readSource(root,'linked/source.txt'));await assert.rejects(protectedSource(root,'linked',{listing:true}));
 });
 test('a project-root link is rejected rather than silently canonicalized outside',async t=>{
-  const {base,root}=await fixture(t);const alias=join(base,'alias');await symlink(root,alias,process.platform==='win32'?'junction':'dir');
+  const {base,root}=await fixture(t);const alias=join(base,'alias');if(!await createTestLink(t,()=>symlink(root,alias,process.platform==='win32'?'junction':'dir'),{kind:'root junction/symlink'}))return;
   await assert.rejects(readSource(alias,'sub/source.txt'));
 });
 test('leaf symlinks are rejected when the OS permits their creation',async t=>{
   const {root,outside}=await fixture(t);
-  try{await symlink(join(outside,'source.txt'),join(root,'leaf.txt'),'file');}
-  catch(error){if(process.platform==='win32'&&error.code==='EPERM'){t.skip('Windows file-symlink creation privilege is unavailable; junction cases run separately');return;}throw error;}
+  if(!await createTestLink(t,()=>symlink(join(outside,'source.txt'),join(root,'leaf.txt'),'file'),{kind:'leaf file symlink'}))return;
   await assert.rejects(readSource(root,'leaf.txt'));
 });
 test('concurrent parent replacement never reads an outside source',async t=>{
   const {base,root,outside}=await fixture(t);
+  const probe=join(base,'capability-link');
+  if(!await createTestLink(t,()=>symlink(outside,probe,process.platform==='win32'?'junction':'dir'),{kind:'real concurrent replacement junction/symlink'}))return;
+  await unlink(probe); // Cleanup failures are not permission-skipped.
   const original=await lstat(join(root,'sub'),{bigint:true});
   const worker=new Worker(new URL('./fixtures/fs-race.js',import.meta.url),{workerData:{base}});
   const session=raceSession(worker);let reads=0,linkedRounds=0,result;

@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {join,dirname,basename,resolve} from 'node:path';
 import {buildSite} from '../scripts/build.mjs';
 import {PROJECT_ROOT,PUBLIC_FILES,readSource} from '../scripts/files.mjs';
+import {createTestLink} from './fixtures/link-capability.js';
 
 async function fixture(t){
   const base=await mkdtemp(join(tmpdir(),'my-schedule-platform-'));
@@ -34,14 +35,14 @@ test('a regular output remains valid through native path spelling aliases',async
 test('real output junctions/symlinks outside the project stay rejected and untouched',async t=>{
   const {base,root}=await fixture(t),outside=join(base,'outside');await mkdir(outside);
   await writeFile(join(outside,'keep.txt'),'outside fixture');
-  await symlink(outside,join(root,'dist'),process.platform==='win32'?'junction':'dir');
+  if(!await createTestLink(t,()=>symlink(outside,join(root,'dist'),process.platform==='win32'?'junction':'dir'),{kind:'outside output junction/symlink'}))return;
   await assert.rejects(buildSite(root),/linked/);
   assert.equal(await readFile(join(outside,'keep.txt'),'utf8'),'outside fixture');
   assert.equal((await lstat(join(root,'dist'))).isSymbolicLink(),true);
 });
 test('an output link to another directory inside the project is also refused',async t=>{
   const {root}=await fixture(t),other=join(root,'other');await mkdir(other);await writeFile(join(other,'keep.txt'),'inside fixture');
-  await symlink(other,join(root,'dist'),process.platform==='win32'?'junction':'dir');
+  if(!await createTestLink(t,()=>symlink(other,join(root,'dist'),process.platform==='win32'?'junction':'dir'),{kind:'inside output junction/symlink'}))return;
   await assert.rejects(buildSite(root),/linked/);assert.equal(await readFile(join(other,'keep.txt'),'utf8'),'inside fixture');
 });
 test('a regular file named dist is refused without being removed',async t=>{

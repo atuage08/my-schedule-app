@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: [main, 'prototype/**']
+    branches: [main, 'prototype/**', 'feature/**']
   schedule:
     - cron: '21 3 * * 1'
 permissions:
