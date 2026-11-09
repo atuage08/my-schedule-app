@@ -1,6 +1,6 @@
 // No HTML parsing. Text, form values and attributes are always separate from markup.
 const TAGS=new Set('div span h1 h2 h3 p button form label input select option details summary small strong section header main footer i br'.split(' '));
-const ATTRIBUTES=new Set('id class name type placeholder maxlength inputmode min max step role method'.split(' '));
+const ATTRIBUTES=new Set('id class name type placeholder maxlength inputmode min max step role method accept'.split(' '));
 const BOOLEANS=new Set(['checked','selected','disabled','required']);
 export function createDom(document){
   const nodes=children=>children.flatMap(child=>{

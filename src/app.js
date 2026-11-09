@@ -1,21 +1,28 @@
 import {createDom} from './dom.js';
 import {enhanceTimeFields} from './time-controls.js';
-import {MIN_DATE,MAX_DATE,REPEATS,calendarIndicators,deletionPlan,editEventOccurrence,clampDate,dueGroups,parseState,serializeState,restore,removeItem,newId,STORAGE_KEY,dateKey,localDate,addDays,defaults,shiftEnd,validateState,validateItem,rollTasks,complete,eventOn,seed} from './model.js';
+import {ScheduleStore,META_KEY} from './storage.js';
+import {createBackupUI} from './backup-ui.js';
+import {UpgradeNotice,UPGRADE_KEY} from './upgrade-notice.js';
+import {MIN_DATE,MAX_DATE,REPEATS,calendarIndicators,deletionPlan,editEventOccurrence,clampDate,dueGroups,restore,removeItem,newId,STORAGE_KEY,dateKey,localDate,addDays,defaults,shiftEnd,validateItem,rollTasks,complete,eventOn} from './model.js';
 const {h,replace}=createDom(document),$=selector=>document.querySelector(selector);
 const fmt=(date,options={month:'long',day:'numeric',weekday:'short'})=>localDate(date).toLocaleDateString('ja-JP',options);
-let selected=dateKey(),mode='week',view='home',search='',showAllHistory=false,state,storageBlocked=false;
-try{const saved=localStorage.getItem(STORAGE_KEY);state=saved===null?seed():parseState(saved);rollTasks(state);}
-catch{state={version:1,items:[],history:[]};storageBlocked=true;}
+const storage={getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)};
+const store=new ScheduleStore({storage,locks:navigator.locks}),upgrade=new UpgradeNotice({storage,locks:navigator.locks});
+let upgradeChecked=false,upgradeBusy=false;
+let selected=dateKey(),mode='week',view='home',search='',showAllHistory=false,state={version:1,items:[],history:[]},storageBlocked=true,processing=false,reminderKind='none',reminderDismissed=false,reminderSequence=0,lastSaveWarning='';
 function notify(message){$('#notice').textContent=message;clearTimeout(notify.timer);notify.timer=setTimeout(()=>$('#notice').textContent='',4500);}
-function save(){
-  validateState(state);
-  if(storageBlocked)throw Error('保存領域を読み込めないため保存できません。元データを保護しています');
-  localStorage.setItem(STORAGE_KEY,serializeState(state));
+const backupUI=createBackupUI({store,onChange:updateApp,notify});
+function updateApp(){
+  state=store.state||{version:1,items:[],history:[]};storageBlocked=store.status!=='ready'||!store.locks?.request;render();backupUI.changed();
+  const sequence=++reminderSequence;
+  store.reminder().then(result=>{if(sequence===reminderSequence){reminderKind=result.kind;render();}},()=>{});
 }
-function mutate(action){
-  let before;
-  try{before=structuredClone(state);action();if(JSON.stringify(before)!==JSON.stringify(state))save();return true;}
-  catch(error){if(before)state=before;notify('保存できませんでした：'+error.message);return false;}
+async function mutate(action,base=store.token()){
+  if(processing)return false;processing=true;render();
+  try{
+    const result=await store.mutate(action,base);lastSaveWarning=result.warning||'';if(!result.ok)notify(result.message);else if(result.warning)notify(result.warning);
+    return result.ok;
+  }finally{processing=false;updateApp();}
 }
 const empty=text=>h('p',{class:'empty'},text);
 const hint=text=>h('p',{class:'hint'},text);
@@ -81,24 +88,41 @@ function render(){
     content=[intro('ROOM FOR POSSIBILITIES','いつかやる','まだ日付のない、あなたのアイデア。'),h('label',{class:'search'},h('span',{},'⌕'),h('input',{id:'search',type:'search',placeholder:'タスクを検索',value:search,'aria-label':'いつかやるを検索'})),h('div',{class:'tasks'},filtered.length?filtered.map(taskRow):empty('タスクが見つかりません')),hint('◇ でピン留め。タップして期限を設定できます。')];
   }else content=historyView();
   const heading=view!=='home'?textButton('‹ ホームに戻る',{class:'back','data-view':'home'}):h('div',{class:'welcome'},h('span',{},'こんにちは。',h('br'),h('strong',{},'今日は、どんな一日に？')),textButton('今日へ ↗',{class:'today-button','data-today':''}));
-  replace($('#app'),h('div',{class:'app-shell'},h('header',{},h('div',{class:'brand'},h('span',{class:'brand-mark'},'m',h('span',{},'・')),h('div',{},h('h1',{},'マイスケジュール'),h('p',{},'毎日に、ちょうどいい余白を。'))),h('span',{class:'prototype'},'PROTOTYPE')),h('main',{},heading,storageBlocked&&h('p',{class:'error'},'保存データを読み込めませんでした。元データは上書きせず保護しています。ブラウザの保存設定やデータを確認してください。'),content,h('footer',{},h('span',{class:'local-dot'}),' この端末だけに保存 · 架空データの試作品',h('br'),h('small',{},'ChatGPT・Apple通知連携は未実装です'))),h('div',{class:'add-dock'},h('button',{class:'add-button',id:'add'},'＋ ',h('span',{},'追加')))));
+  const reminderText={first:'データを変更しました。JSONバックアップを保存しておくと安心です。',due:'前回の保存確認から336時間以上経過し、データが変わっています。',clock:'時計が変わったため、バックアップからの経過時間を確認できません。'}[reminderKind];
+  replace($('#app'),h('div',{class:'app-shell'},h('header',{},h('div',{class:'brand'},h('span',{class:'brand-mark'},'m',h('span',{},'・')),h('div',{},h('h1',{},'マイスケジュール'),h('p',{},'毎日に、ちょうどいい余白を。'))),h('span',{class:'prototype'},'PROTOTYPE')),h('main',{},heading,
+    h('button',{id:'backup-open',class:'backup-entry'},'バックアップ・復元'),
+    upgrade.required&&h('section',{id:'upgrade-notice',class:'upgrade-notice',role:'region','aria-label':'更新後の確認'},h('h2',{},'更新後に一度、旧版の終了を確認してください'),h('p',{},'更新前から開いている他のタブ・ホーム画面版をすべて閉じ、新版を開き直してください。旧版は同じWeb Lockに参加しません。'),h('p',{},'この確認は自己申告です。旧版との競合を完全に検出・防止できるものではありません。'),h('label',{class:'backup-check'},h('input',{type:'checkbox',id:'upgrade-checked',checked:upgradeChecked,disabled:upgradeBusy}),' 旧版を終了し、新版を開き直したことを確認しました'),h('button',{id:'upgrade-confirm',disabled:upgradeBusy||!upgradeChecked},'確認を記録して案内を閉じる')),
+    lastSaveWarning&&h('p',{class:'error',role:'status'},lastSaveWarning),
+    !reminderDismissed&&reminderText&&h('section',{class:'backup-reminder'},h('p',{},reminderText),h('button',{id:'backup-reminder-open'},'バックアップを開く'),h('button',{id:'backup-dismiss'},'今回は閉じる')),
+    storageBlocked&&h('p',{class:'error'},store.status==='unverified'?'書き込みの成否は不確定です。この画面では通常操作・追加の復元を停止しています。バックアップ・復元から保持中の元データを退避してください。再読み込み・終了でメモリー上の退避対象は失われます。':'通常保存を停止しています。元データを削除・初期化せず保護しています。バックアップ・復元から状態を確認できます。'),content,h('footer',{},h('span',{class:'local-dot'}),' この端末だけに保存 · 架空データの試作品',h('br'),h('small',{},'ChatGPT・Apple通知連携は未実装です'))),h('div',{class:'add-dock'},h('button',{class:'add-button',id:'add'},'＋ ',h('span',{},'追加')))));
   bind();
+  document.querySelectorAll('#add,[data-complete],[data-restore],[data-pin],[data-edit],#entry-form .save,#delete').forEach(node=>{node.disabled=processing||storageBlocked;});
 }
 function bind(){
+  if($('#upgrade-checked'))$('#upgrade-checked').onchange=event=>{upgradeChecked=event.target.checked;$('#upgrade-confirm').disabled=upgradeBusy||!upgradeChecked;};
+  if($('#upgrade-confirm'))$('#upgrade-confirm').onclick=async()=>{
+    if(upgradeBusy)return;upgradeBusy=true;render();
+    try{const result=await upgrade.acknowledge(upgradeChecked);notify(result.ok?'新版の利用確認を記録しました':result.message);if(result.ok)upgradeChecked=false;}
+    finally{upgradeBusy=false;render();}
+  };
+  $('#backup-open').onclick=()=>backupUI.open();
+  if($('#backup-reminder-open'))$('#backup-reminder-open').onclick=()=>backupUI.open();
+  if($('#backup-dismiss'))$('#backup-dismiss').onclick=()=>{reminderDismissed=true;render();};
   document.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{view=button.dataset.view;search='';render();window.scrollTo(0,0);});
   document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>{mode=button.dataset.mode;render();});
   document.querySelectorAll('[data-day]').forEach(button=>button.onclick=()=>{selected=button.dataset.day;render();});
   document.querySelectorAll('[data-nav]').forEach(button=>button.onclick=()=>{if(mode==='week')selected=clampDate(addDays(selected,7*Number(button.dataset.nav)));else{const date=localDate(selected);date.setDate(1);date.setMonth(date.getMonth()+Number(button.dataset.nav));selected=clampDate(dateKey(date));}render();});
   if($('[data-today]'))$('[data-today]').onclick=()=>{selected=dateKey();render();};
-  document.querySelectorAll('[data-complete]').forEach(button=>button.onclick=()=>{if(mutate(()=>complete(state,button.dataset.complete))){render();notify('タスクを完了しました');}});
-  document.querySelectorAll('[data-restore]').forEach(button=>button.onclick=()=>{if(mutate(()=>restore(state,button.dataset.restore))){render();notify('未完了に戻しました。繰り返しは現在の1件に統合します');}});
-  document.querySelectorAll('[data-pin]').forEach(button=>button.onclick=()=>{if(mutate(()=>{const task=state.items.find(item=>item.id===button.dataset.pin);task.pinned=!task.pinned;}))render();});
+  document.querySelectorAll('[data-complete]').forEach(button=>button.onclick=async()=>{if(await mutate(draft=>complete(draft,button.dataset.complete))){render();notify('タスクを完了しました');}});
+  document.querySelectorAll('[data-restore]').forEach(button=>button.onclick=async()=>{if(await mutate(draft=>restore(draft,button.dataset.restore))){render();notify('未完了に戻しました。繰り返しは現在の1件に統合します');}});
+  document.querySelectorAll('[data-pin]').forEach(button=>button.onclick=async()=>{if(await mutate(draft=>{const task=draft.items.find(item=>item.id===button.dataset.pin);task.pinned=!task.pinned;}))render();});
   document.querySelectorAll('[data-edit]').forEach(button=>button.onclick=()=>openEditor(state.items.find(item=>item.id===button.dataset.edit),button.dataset.occurrence));
   $('#add').onclick=()=>openEditor();
   if($('#search'))$('#search').oninput=event=>{const position=event.target.selectionStart;search=event.target.value;render();$('#search').focus();try{$('#search').setSelectionRange(position,position);}catch{}};
   if($('#all-history'))$('#all-history').onchange=event=>{showAllHistory=event.target.checked;render();};
 }
 function openEditor(original=null,occurrence=null){
+  const entryBase=store.token();
   const dialog=$('#editor');let type=original?.type||'event';
   const data=original?structuredClone(original):{id:newId(),title:'',...defaults(selected),allDay:false,due:null,pinned:false,repeat:'none',excluded:[]};
   if(original?.type==='event'&&occurrence){const current=eventOn(original,selected);if(current){data.start=current.start;data.end=current.end;}}
@@ -136,9 +160,9 @@ function openEditor(original=null,occurrence=null){
     const scope=()=>form.elements.deleteScope?.value||form.elements.scope?.value||'all';
     if($('#delete'))$('#delete').onclick=async()=>{
       const deletionScope=scope(),expected=JSON.stringify(state.items.find(item=>item.id===original.id));
-      if(await confirmDeletion(original,deletionScope,occurrence))if(mutate(()=>{if(JSON.stringify(state.items.find(item=>item.id===original.id))!==expected)throw Error('項目が変更されました。開き直してから削除してください');removeItem(state,original.id,deletionScope,occurrence||original.start?.slice(0,10));})){dialog.close();render();notify('削除しました');}
+      if(await confirmDeletion(original,deletionScope,occurrence))if(await mutate(draft=>{if(JSON.stringify(draft.items.find(item=>item.id===original.id))!==expected)throw Error('項目が変更されました。開き直してから削除してください');removeItem(draft,original.id,deletionScope,occurrence||original.start?.slice(0,10));},entryBase)){dialog.close();render();notify('削除しました');}
     };
-    form.onsubmit=event=>{
+    form.onsubmit=async event=>{
       event.preventDefault();
       try{
         capture();const date=type==='event'?data.start:data.due||selected;
@@ -146,17 +170,26 @@ function openEditor(original=null,occurrence=null){
         const one=original&&original.repeat!=='none'&&scope()==='one';
         if(one){item={...item,id:newId(),repeat:'none',excluded:[]};delete item.seriesId;}
         else if(original&&original.repeat!=='none'&&type==='event'&&occurrence){const days=Math.round((localDate(item.start.slice(0,10))-localDate(occurrence))/86400000),start=addDays(original.start.slice(0,10),days)+item.start.slice(10);item.end=shiftEnd(item.start,item.end,start);item.start=start;item.anchorDay=Number(start.slice(8,10));item.anchorMonth=Number(start.slice(5,7));}
-        if(mutate(()=>{if(one){if(type==='event')editEventOccurrence(state,original.id,item,occurrence||original.start.slice(0,10));else{removeItem(state,original.id,scope());state.items.push(item);}}else{state.items=state.items.filter(existing=>existing.id!==item.id);state.items.push(item);}rollTasks(state);})){dialog.close();render();notify('保存しました');}
+        if(await mutate(draft=>{if(one){if(type==='event')editEventOccurrence(draft,original.id,item,occurrence||original.start.slice(0,10));else{removeItem(draft,original.id,scope());draft.items.push(item);}}else{draft.items=draft.items.filter(existing=>existing.id!==item.id);draft.items.push(item);}rollTasks(draft);},entryBase)){dialog.close();render();notify('保存しました');}
       }catch(error){$('#form-error').textContent=error.message;}
     };
   }
   draw();dialog.showModal();
 }
 $('#editor').addEventListener('click',event=>{if(event.target===$('#editor')){const rect=event.target.getBoundingClientRect();if(event.clientY<rect.top||event.clientX<rect.left||event.clientX>rect.right)event.target.close();}});
-document.addEventListener('visibilitychange',()=>{if(document.hidden)return;const previous=JSON.stringify(state);if(mutate(()=>rollTasks(state))&&previous!==JSON.stringify(state))render();});
-window.addEventListener('storage',event=>{
-  if(event.key!==STORAGE_KEY)return;
-  try{state=event.newValue===null?seed():parseState(event.newValue);storageBlocked=false;rollTasks(state);$('#delete-confirm').close('cancel');$('#editor').close();render();notify('別の画面での変更を反映しました');}
-  catch{storageBlocked=true;$('#delete-confirm').close('cancel');$('#editor').close();render();notify('保存データの形式を確認できません');}
-});
+async function refreshAndRoll(){
+  upgrade.refresh();
+  const revision=store.revision;
+  try{
+    await store.refresh();
+    if(revision!==store.revision){$('#delete-confirm').close('cancel');$('#editor').close();}
+    if(store.status==='ready'&&store.locks?.request){const result=await store.rollover();if(!result.ok)notify(result.message);}
+  }catch{notify('保存領域の確認を完了できませんでした');}
+  updateApp();
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshAndRoll();});
+window.addEventListener('storage',event=>{if(event.key===UPGRADE_KEY){upgrade.refresh();render();}else if(event.key===null||event.key===STORAGE_KEY||event.key===META_KEY)refreshAndRoll();});
 render();
+await store.initialize();
+if(store.status==='ready'&&store.locks?.request){const result=await store.rollover();if(!result.ok)notify(result.message);}
+updateApp();

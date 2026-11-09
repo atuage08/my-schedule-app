@@ -2,7 +2,7 @@
 
 ## レビュー対象
 
-個人向け「マイスケジュール」の第1段階試作品です。Windowsの差し替え競合テストを安定化したr6版です。完成済み攻撃リンクの設置と、読み込み完了後の復元、ワーカー終了処理を検証します。ソース読み込み本体の保護は維持しています。データはすべて架空で、外部API・通知・同期は未実装です。
+個人向け「マイスケジュール」の第2段階、JSONバックアップ・通常復元・緊急復旧を実装した版です。作業ブランチはfeature/json-backup-restoreで、コミット・push・公開は行っていません。第1段階のソース読み込み保護と機能を維持しています。試験データは架空で、外部API・OS通知・同期は未実装です。
 
 このZIPにはソース、スタイル、テスト、ビルド／検査スクリプト、GitHub Actions設定、文書を含めています。node_modules、.git、dist、画像、保存データ、ZIP自身、認証情報・環境設定は含めていません。Git作者・リモート・会話ログも含めません。`REVIEW-MANIFEST.json` に各ファイルのSHA-256があります。
 
@@ -26,11 +26,13 @@ node scripts/build.mjs
 4. Pagesのリポジトリ配下パスでの参照解決、配信・ZIP対象の限定、Actions権限。
 5. iPhoneのキーボード、フォームのラベル、片手操作、文字サイズとコントラスト。
 
-Nodeテストは117件（既存106件の検証目的を維持＋新規11件）です。今回のWindows環境ではAsia/Tokyo・UTCとも116件成功、失敗0、既存のファイルシンボリックリンク作成権限がない1件はスキップしました。ジャンクション・ハードリンク・親の差し替え競合は実行して成功しています。競合テストは追加で各タイムゾーン5回、計10回実行しすべて成功しました。Ubuntu環境がないため、今回の変更のLinux側の実行は未確認です。CIにはWindowsとUbuntuの両方を設定しています。
+Nodeテストは220件（既存202件＋r4回帰18件）です。WindowsのAsia/Tokyo・UTCとも、通常環境は219成功・失敗0・権限制約スキップ1、制限付きサンドボックスは213成功・失敗0・権限制約スキップ7です。r3で確認したリンクテストとスキップ条件は変更していません。MY_SCHEDULE_REQUIRE_LINKS=1でスキップを禁止できます。Ubuntuは未検証です。最新の状態管理と結果はdocs/json-backup-security-r4.mdを参照してください。
 
-ブラウザ操作ツールのTab APIを受け取る関数 `runBrowserSmoke(tab)` は28項目、`runBrowserSecurity(tab)` は不正HTML・特殊文字の25項目が成功しています。単独Node実行ではブラウザを起動しません。モジュールはそれぞれ `scripts/browser-smoke.mjs` と `scripts/browser-security.mjs` です。127.0.0.1の試作品で架空データを使用し、自分で作った未完了項目だけを削除します。保存領域へテストから直接書き込みません。GitHub CIのブラウザ実行環境は未導入です。
+第2段階の実ブラウザ試験は `node scripts/browser-backup-test.mjs` です。既存Edge（またはMY_SCHEDULE_BROWSERで指定した既存Chromium系）を専用の一時プロファイルで起動します。127.0.0.1の一時オリジンで架空データだけを使い、破損状態の試験もその領域だけに設定します。従来の操作と保護停止に加え、現在の破損Bと過去の保持Aを別々に退避する52項目と390px幅を確認します。公開環境と既存ブラウザプロファイルは使いません。iPhoneの実ファイル保存とは別の検証です。
 
-最新の変更・検証の制限は `docs/windows-race-stability-report.md`、過去の修正は `docs/windows-ci-fixes-report.md` と `docs/codeql-fixes-report.md`、入力・保存件数の上限と探索方式は `docs/review-fixes-report.md` を参照してください。今回の修正はpushしていないため、GitHub Actions・CodeQL再実行はまだです。実際のPagesでの読込、iPhone/Safari実機評価も未実施です。
+過去の第1段階では `runBrowserSmoke(tab)` の28項目と `runBrowserSecurity(tab)` の25項目を確認しています。今回この2つは再実行していません。GitHub CIのブラウザ実行環境は未導入です。
+
+最新の変更・検証の制限・独立レビュー重点箇所は `docs/json-backup-security-r4.md`、以前のP2対応は `docs/json-backup-security-r3.md` を参照してください。今回の修正はpushしていないためGitHub Actions・CodeQL再実行はまだです。公開中のCloudflare Pagesには変更していません。iPhone/Safari実機評価も未実施です。
 
 同一Pagesホストの別パスは保存領域のセキュリティ境界になりません。詳細と提案は `docs/pages-preparation.md` を参照してください。
 

@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   pull_request:
   push:
-    branches: [main, 'prototype/**']
+    branches: [main, 'prototype/**', 'feature/**']
 permissions:
   contents: read
 jobs:

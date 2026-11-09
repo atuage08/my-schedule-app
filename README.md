@@ -10,10 +10,10 @@ Node.js 22以上（推奨24）で、プロジェクト内から実行します�
 node scripts/check.mjs
 node --test test/*.test.js
 node scripts/build.mjs
-# 公開対象は dist/ の7ファイルのみ
+# 公開対象は dist/ の11ファイルのみ
 ```
 
-今後のiPhone試験はGitHub PagesのHTTPS URLを使用する方針です。現時点では公開していないため、iPhone向けURLはありません。家庭内LAN接続は使用せず、ファイアウォール設定も変更しません。必要な場合だけ `node server.mjs` でビルド済みdistをPC内の `http://127.0.0.1:4173/` に表示できます。サーバーはLANへバインドしません。
+第2段階はfeature/json-backup-restoreで実装し、ローカル検証のみ行います。公開中のCloudflare Pages試作品と設定は変更しません。実機検証先は別途承認後の独立したHTTPSオリジンとします。家庭内LAN接続は使用せず、ファイアウォール設定も変更しません。必要な場合だけ `node server.mjs` でビルド済みdistをPC内の `http://127.0.0.1:4173/` に表示できます。サーバーはLANへバインドしません。
 
 CSSとJSの相対参照により、ルート直下でも `/my-schedule-app/` のようなリポジトリ配下でも動く構成です。`.nojekyll` を出力し、実行時依存・CDN・サーバー処理はありません。画面遷移は同一HTML内で完結します。
 
@@ -21,6 +21,8 @@ CSSとJSの相対参照により、ルート直下でも `/my-schedule-app/` の
 
 - `src/model.js`: ローカル日付、時刻の初期値、繰り返し、整合性検証、完了処理。UIに依存しません。
 - `src/app.js`: 画面構成、入力パネル、保存操作。ブラウザ標準APIだけを使用。
+- `src/backup.js` / `src/storage.js` / `src/backup-ui.js`: JSONバックアップ・復元、緊急復旧、Web Locksを使う一括保存、336時間の案内と画面。
+- `src/upgrade-notice.js`: 旧版終了案内の確認記録。未確認時は通常画面にも表示します。
 - `src/dom.js`: 許可したタグ・属性だけで要素を生成。名称・検索文字列はテキストノードやvalueとして設定し、HTMLとして解釈しません。
 - `styles.css`: 色、レイアウト、iPhone safe area、入力パネル。UI評価後に差し替え可能。
 - `test/model.test.js`: 日付境界・基本登録条件・完了・繰り越し・保存形式の自動テスト。
@@ -46,7 +48,7 @@ CSSとJSの相対参照により、ルート直下でも `/my-schedule-app/` の
 
 旧版で既に関連情報なしに作られた独立予定は、名称や日付から推測でシリーズへ結び付けません。既存の無関係な予定の誤削除を避けるためです。関連付けは今回の修正後に行う「今回だけ編集」から保存します。
 
-完了履歴は期限で削除せず保存し、通常は直近90日を表示します。ただしブラウザのデータ削除・容量制限・端末紛失を超えて保存を保証するものではありません。同期・バックアップ・復元は後続対応です。
+完了履歴は期限で削除せず保存し、通常は直近90日を表示します。JSONバックアップには全履歴を含みます。ただし件数・容量上限があり、ブラウザのデータ削除・端末紛失を超えて保存を保証するものではありません。古いバックアップへの全置換では、その後の変更と履歴は残りません。同期は未実装です。
 
 削除時には確認画面を表示します。繰り返しの「今回だけ」は対象日と、ほかの回が残ることを表示し、「すべて」は過去・今後のシリーズ全体と明示します。完了履歴は削除しません。
 
@@ -56,7 +58,7 @@ CSSとJSの相対参照により、ルート直下でも `/my-schedule-app/` の
 
 ## 保存・分離
 
-保存先はlocalStorageの `my-schedule.prototype.v1` のみ。ほかのキーを読み書きせず、`localStorage.clear()` も使用しません。読み込み時と保存前に形式と日時の整合性を検証します。読み込み失敗時は元データを上書きせず保存を停止し、書き込み失敗時はメモリー上の変更を戻します。保存失敗は画面に表示します。別タブからの変更はstorageイベントで再読込しますが、複数タブ間の完全なトランザクション制御はありません。
+予定・履歴はlocalStorageの `my-schedule.prototype.v1`、バックアップ案内記録は `my-schedule.backup-meta.v1`、旧版終了の確認は `my-schedule.write-protocol-ack.v1` に保存します。ほかのアプリのキーやlocalStorage.clear()は使用しません。全データ保存は同じWeb Lock内で基準文字列を再比較し、検証後に一括保存・読み戻し確認します。破損時は通常保存を止め、厳格なファイル検証と明示的な最終承認による緊急復旧だけを許可します。確認不能時は成否不確定として同じページの保護停止を維持し、元データを退避する前に再読み込みしないよう案内します。Web Locksがない場合は書き込み停止です。旧版はロックに参加しないため、旧版画面を閉じて開き直す案内を通常画面にも表示します。
 
 CSPで通信先を禁止し、外部画像・フォント・計測・APIは使用しません。画面はDOM APIで生成し、名称・保存データ・DOMから読み戻した値をHTMLとして再解釈しません。保存データは暗号化していません。実データを入れず架空データで試してください。
 
@@ -64,28 +66,30 @@ CSPで通信先を禁止し、外部画像・フォント・計測・APIは使�
 
 ## GitHubと公開
 
-専用リポジトリは [atuage08/my-schedule-app](https://github.com/atuage08/my-schedule-app) です。mainには初期READMEだけを置き、試作品コードは `prototype/phase-1` からPRで検査します。試作品コードのmainへのマージとPages公開は別途判断します。既存アプリのリポジトリやPages設定には接続しません。
+専用リポジトリは [atuage08/my-schedule-app](https://github.com/atuage08/my-schedule-app) です。第2段階は `feature/json-backup-restore` で作業し、今回mainへの反映や公開は行いません。既存のからだ記録アプリには変更しません。
 
 `Prototype checks` は手動実行・PR・対象ブランチのpushで、Windows・UbuntuそれぞれのAsia/TokyoとUTCでソース検査・テスト・ビルドを行う設定です。distの検査用成果物を7日間保存しますが、デプロイ権限や公開処理はありません。PRのChecksで実際の結果を確認してください。必要な必須検査設定とレビューの後に、公開手順を別途追加します。
 
 CodeQL設定は [GitHub公式資料](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options) に基づきます。リポジトリの可視性・契約によってCodeQLの利用条件が変わるため、接続後に実行結果を確認してください。現在は公開ワークフローを自動実行しません。
 
-保存領域の共有リスクと専用オリジンの提案は [Pages準備・分離設計](docs/pages-preparation.md)、最新の修正は [差し替え競合テストの安定化](docs/windows-race-stability-report.md)、過去の修正は [Windows CI失敗への対応](docs/windows-ci-fixes-report.md) と [CodeQL警告への対応](docs/codeql-fixes-report.md) を参照してください。[PR本文の下書き](docs/pr-draft.md) も用意しています。
+最新の仕様・検証・独立レビュー項目は [退避対象の取り違え対応r4](docs/json-backup-security-r4.md)、以前のP2対応は [r3報告](docs/json-backup-security-r3.md) を参照してください。保存領域の共有リスクは [Pages準備・分離設計](docs/pages-preparation.md)、過去の修正は [差し替え競合テスト](docs/windows-race-stability-report.md) と [CodeQL対応](docs/codeql-fixes-report.md) に記録しています。
 
 ## 独立レビュー用ZIP
 
 WindowsのPowerShellで実行します。Node.jsと.NET標準機能のみを使います。
 
 ```powershell
-pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-r6-race-stability.zip
+pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-phase2-security-r4.zip
 ```
 
-出力は `artifacts/my-schedule-source-review-r6-race-stability.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
+出力は `artifacts/my-schedule-source-review-phase2-security-r4.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
 
 ## 未実装・要実機評価
 
 - ChatGPT連携、Apple通知、カレンダー連携、アカウント、サーバー同期、PWAオフライン対応。
 - iPhone Safariでの片手操作、キーボード表示中の保存ボタン位置、24時間・1分入力の確認。
+- JSONの実保存・共有・再選択・通常復元・緊急復旧・ホーム画面版の再起動をiOS 17以降の実機で確認。手順はdocs/iphone-checklist.md。
+- `node scripts/browser-backup-test.mjs` は専用プロファイルで第2段階52項目と390px幅を検査します。既存の28項目・25項目の試験とは別です。
 - ブラウザ操作テストは `scripts/browser-smoke.mjs` に再利用可能な関数を用意し、ブラウザ操作ツールで28項目を確認済み。GitHub CIでのブラウザテスト実行環境は未導入。
 - `scripts/browser-security.mjs` で不正HTML・特殊文字の再描画・保存・編集・削除確認を25項目確認済み。
 - 今回の修正のGitHub Actions・CodeQL再検査、検査後の公開。PR #1は作成済みです。

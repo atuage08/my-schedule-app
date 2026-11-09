@@ -35,7 +35,7 @@ test('DOM helper rejects executable tags, URL attributes and string event handle
   assert.throws(()=>h('form',{method:'post'}));
 });
 test('all app rendering modules are free of HTML parser sinks',async()=>{
-  for(const name of ['app.js','dom.js','time-controls.js']){
+  for(const name of ['app.js','dom.js','time-controls.js','backup-ui.js']){
     const source=await readFile(new URL('../src/'+name,import.meta.url),'utf8');
     assert.ok(!/\.(?:innerHTML|outerHTML)\s*=|insertAdjacentHTML|document\.write\s*\(|createContextualFragment|DOMParser/.test(source),name);
   }
