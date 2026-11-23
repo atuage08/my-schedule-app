@@ -34,12 +34,13 @@ test('history snapshots are not rejected merely because the original item was de
   const data=rich();data.items=data.items.filter(item=>item.type!=='task');
   assert.equal((await readBackupFile((await createBackup(data,now)).file)).data.history.length,2);
 });
-test('rollover plan is separate and reports due changes and exhausted tasks by name and reason',()=>{
-  const data=seed('2026-11-09');data.items[2].repeat='weekly';
+test('restore plan reports changed due dates and retains exhausted tasks with their original fields',()=>{
+  const data=seed('2026-11-09');data.items[2].repeat='daily';
   data.items[3].repeat='yearly';data.items[3].due='2100-11-01';
   const before=serializeState(data),plan=prepareRestore(data,'2100-12-31');
-  assert.equal(serializeState(data),before);assert.equal(plan.changes.length,2);
-  assert.ok(plan.changes.some(change=>change.after===null&&change.title===data.items[3].title&&change.reason));
+  assert.equal(serializeState(data),before);assert.equal(plan.changes.length,1);
+  assert.deepEqual(plan.retained,[{title:data.items[3].title,due:data.items[3].due}]);
+  assert.deepEqual(plan.candidate.items[3],data.items[3]);
   assert.equal(plan.candidate.history.length,data.history.length);
 });
 test('canonical data ignores object key order while preserving array order and optional field presence',()=>{

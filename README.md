@@ -1,19 +1,21 @@
+> 基本機能先行公開候補です。通知は共通制御で停止しています。通知情報付きの既存項目は閲覧・バックアップが可能です。検証状況と正式公開前の確認項目は [先行版候補](docs/basic-release-candidate.md) を参照してください。
+
 # マイスケジュール — 第1段階プロトタイプ
 
 「からだ記録アプリ」と別フォルダーで作成した、外部依存ゼロの静的Webアプリ。実データ・外部API・解析ツールは使用しません。初回に架空の予定とタスクを表示します。
 
-## 検証とGitHub Pages向けビルド
+## 検証と配信用ビルド
 
 Node.js 22以上（推奨24）で、プロジェクト内から実行します。ソースの検査・ビルドはWindowsまたはLinuxに対応します。Windowsでは標準のWindows PowerShellと.NETを使用します。追加パッケージのインストールは不要です。
 
 ```sh
 node scripts/check.mjs
-node --test test/*.test.js
+node scripts/test.mjs
 node scripts/build.mjs
-# 公開対象は dist/ の11ファイルのみ
+# 配信対象は dist/ の18ファイル
 ```
 
-第2段階はfeature/json-backup-restoreで実装し、ローカル検証のみ行います。公開中のCloudflare Pages試作品と設定は変更しません。実機検証先は別途承認後の独立したHTTPSオリジンとします。家庭内LAN接続は使用せず、ファイアウォール設定も変更しません。必要な場合だけ `node server.mjs` でビルド済みdistをPC内の `http://127.0.0.1:4173/` に表示できます。サーバーはLANへバインドしません。
+基本機能先行版の実機検証には、通知開発版から独立したCloudflare Pagesのテストサイトを使用しました。PC内で確認する場合は、`node server.mjs` でビルド済みdistを `http://127.0.0.1:4173/` に表示できます。
 
 CSSとJSの相対参照により、ルート直下でも `/my-schedule-app/` のようなリポジトリ配下でも動く構成です。`.nojekyll` を出力し、実行時依存・CDN・サーバー処理はありません。画面遷移は同一HTML内で完結します。
 
@@ -66,13 +68,13 @@ CSPで通信先を禁止し、外部画像・フォント・計測・APIは使�
 
 ## GitHubと公開
 
-専用リポジトリは [atuage08/my-schedule-app](https://github.com/atuage08/my-schedule-app) です。第2段階は `feature/json-backup-restore` で作業し、今回mainへの反映や公開は行いません。既存のからだ記録アプリには変更しません。
+専用リポジトリは [atuage08/my-schedule-app](https://github.com/atuage08/my-schedule-app) です。基本機能先行版は `codex/basic-release-candidate` の独立worktreeで準備しています。正式公開の判断はPRの検査・レビューと配信物の照合後に行います。
 
 `Prototype checks` は手動実行・PR・対象ブランチのpushで、Windows・UbuntuそれぞれのAsia/TokyoとUTCでソース検査・テスト・ビルドを行う設定です。distの検査用成果物を7日間保存しますが、デプロイ権限や公開処理はありません。PRのChecksで実際の結果を確認してください。必要な必須検査設定とレビューの後に、公開手順を別途追加します。
 
 CodeQL設定は [GitHub公式資料](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options) に基づきます。リポジトリの可視性・契約によってCodeQLの利用条件が変わるため、接続後に実行結果を確認してください。現在は公開ワークフローを自動実行しません。
 
-最新の仕様・検証・独立レビュー項目は [退避対象の取り違え対応r4](docs/json-backup-security-r4.md)、以前のP2対応は [r3報告](docs/json-backup-security-r3.md) を参照してください。保存領域の共有リスクは [Pages準備・分離設計](docs/pages-preparation.md)、過去の修正は [差し替え競合テスト](docs/windows-race-stability-report.md) と [CodeQL対応](docs/codeql-fixes-report.md) に記録しています。
+現在の仕様と検証状況は [先行版候補](docs/basic-release-candidate.md) に記録しています。バックアップ保護の経緯は [退避対象の取り違え対応r4](docs/json-backup-security-r4.md) と [r3報告](docs/json-backup-security-r3.md) を参照してください。保存領域の共有リスクは [Pages準備・分離設計](docs/pages-preparation.md)、過去の修正は [差し替え競合テスト](docs/windows-race-stability-report.md) と [CodeQL対応](docs/codeql-fixes-report.md) に記録しています。
 
 ## 独立レビュー用ZIP
 
@@ -82,16 +84,13 @@ WindowsのPowerShellで実行します。Node.jsと.NET標準機能のみを使�
 pwsh -NoProfile -File scripts/review-zip.ps1 -ArchiveName my-schedule-source-review-phase2-security-r4.zip
 ```
 
-出力は `artifacts/my-schedule-source-review-phase2-security-r4.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書とSHA-256一覧を含み、.git、node_modules、dist、画像、環境ファイル、保存データ、ZIP自身を除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
+出力は `artifacts/my-schedule-source-review-phase2-security-r4.zip`。既存ZIPは上書きせずエラーにします。別名を指定でき、旧ZIPも保持します。ソース・テスト・設定・Markdown文書・公開用アイコン・SHA-256一覧を含みます。Git管理領域、生成物、公開用アイコン以外の画像、環境ファイル、保存データは除外します。ZIPは保護された読み込みで取得したバイト列から作成し、パスを開き直しません。作成前の簡易スキャンと作成後のハッシュ検証を行います。
 
-## 未実装・要実機評価
+## 提供範囲と検証
 
 - ChatGPT連携、Apple通知、カレンダー連携、アカウント、サーバー同期、PWAオフライン対応。
-- iPhone Safariでの片手操作、キーボード表示中の保存ボタン位置、24時間・1分入力の確認。
-- JSONの実保存・共有・再選択・通常復元・緊急復旧・ホーム画面版の再起動をiOS 17以降の実機で確認。手順はdocs/iphone-checklist.md。
-- `node scripts/browser-backup-test.mjs` は専用プロファイルで第2段階52項目と390px幅を検査します。既存の28項目・25項目の試験とは別です。
-- ブラウザ操作テストは `scripts/browser-smoke.mjs` に再利用可能な関数を用意し、ブラウザ操作ツールで28項目を確認済み。GitHub CIでのブラウザテスト実行環境は未導入。
-- `scripts/browser-security.mjs` で不正HTML・特殊文字の再描画・保存・編集・削除確認を25項目確認済み。
-- 今回の修正のGitHub Actions・CodeQL再検査、検査後の公開。PR #1は作成済みです。
+- Windows Chrome、iPhone Safari、iPhoneホーム画面追加版で、主要機能・データ保持・JSONバックアップと復元を実機確認しました。最終修正後に繰り返し種別変更と完了後の次回期限も確認しました。
+- `node scripts/browser-basic-test.mjs` は隔離ブラウザーで先行版の主要操作を検査します。 `node scripts/browser-backup-test.mjs` はバックアップ・復元・緊急復旧の検証に使用します。
+- 正式公開前に、先行版のPRでWindows・UbuntuのCI、CodeQL、実リンクを使う検証を確認します。
 
 外部連携は未実装であることを画面にも明示しています。将来の連携は `model.js` の状態を扱う専用アダプターを追加する方針で、現段階では認証情報・権限・外部呼び出しを含めていません。

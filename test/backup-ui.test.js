@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createBackupUI} from '../src/backup-ui.js';
-import {ScheduleStore,META_KEY} from '../src/storage.js';
+import {ScheduleStore,META_KEY,MIGRATION_KEY} from '../src/storage.js';
 import {createBackup} from '../src/backup.js';
 import {STORAGE_KEY,seed,serializeState} from '../src/model.js';
 class TextNode{nodeType=3;constructor(value){this.textContent=value;}}
@@ -93,6 +93,7 @@ test('hostile filenames and task titles render as text without HTML parsing',asy
   try{
     const data=seed('2026-11-09');data.items[2].title='<svg onload=alert(1)>';data.items[2].repeat='daily';data.items[2].due='2100-12-30';data.items[2].excluded=['2100-12-30','2100-12-31'];
     env.store.now=()=>new Date('2100-12-31T03:00:00Z');await env.choose((await createBackup(data)).file);
+    assert.ok(env.root.textContent.includes('対応範囲内に次回なし。元の期限で保持します。'));
     assert.ok(env.root.textContent.includes(data.items[2].title));assert.equal(walk(env.root).some(n=>n.tag==='svg'),false);
   }finally{env.restore();}
 });
@@ -172,4 +173,22 @@ test('failed A recovery followed by B exposes distinct current and historical ac
     const id=env.store.retainedQuarantineInfo()[0].id;await button(env.root,`過去の保持対象を退避（${id}）`).click();
     assert.ok(env.root.textContent.includes('現在の破損データではありません'));assert.ok(env.root.textContent.includes('保存先とは異なります'));
   }finally{env.restore();}
+});
+
+test('migration v1 export is clearly historical and cannot mark current v2 as backed up',async()=>{
+  const env=await environment();
+  try{
+    const raw=env.data.get(STORAGE_KEY);
+    assert.equal((await env.store.mutate(d=>{d.version=2;d.items[0].notification={enabled:true,notifyAt:'2026-11-18T03:00:00.000Z'};})).ok,true);
+    env.ui.changed();const meta=env.data.get(META_KEY),active=env.data.get(STORAGE_KEY);
+    await button(env.root,'移行前v1原本 1 のJSONを準備').click();
+    assert.ok(env.root.textContent.includes('現在のv2データではありません'));
+    await button(env.root,'このJSONファイルを保存できました').click();
+    assert.equal(env.data.get(META_KEY),meta);assert.equal(env.data.get(STORAGE_KEY),active);
+    assert.equal(JSON.parse(env.data.get(MIGRATION_KEY)).entries[0].raw,raw);
+  }finally{env.restore();}
+});
+test('corrupt migration archive is reported without deleting it or the current data',async()=>{
+  const env=await environment();
+  try{const raw=env.data.get(STORAGE_KEY);env.data.set(MIGRATION_KEY,'corrupt');env.ui.changed();assert.ok(env.root.textContent.includes('移行前の保持領域を確認できません'));assert.equal(env.data.get(MIGRATION_KEY),'corrupt');assert.equal(env.data.get(STORAGE_KEY),raw);}finally{env.restore();}
 });

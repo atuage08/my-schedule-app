@@ -1,4 +1,5 @@
-import {parseState,serializeState,rollTasks,dateKey,newId} from './model.js';
+import {parseState,serializeState,rollTasks,taskRecurrences,dateKey,newId} from './model.js';
+import {suspendLink} from './notification-v3.js';
 
 export const MAX_FILE_BYTES=8*1024*1024;
 export class BackupError extends Error {
@@ -58,7 +59,7 @@ export function decodeBackup(input){
   let envelope;
   try{envelope=JSON.parse(text);}catch{fail('json','JSONが破損しているか形式が異なります');}
   structure(envelope);
-  if(!envelope||Array.isArray(envelope)||Object.keys(envelope).sort().join(',')!=='data,exportedAt,format,formatVersion'||envelope.format!=='my-schedule-backup'||envelope.formatVersion!==1)fail('format','未対応のバックアップ形式・バージョンです');
+  if(!envelope||Array.isArray(envelope)||Object.keys(envelope).sort().join(',')!=='data,exportedAt,format,formatVersion'||envelope.format!=='my-schedule-backup'||![1,2,3].includes(envelope.formatVersion)||envelope.data?.version!==envelope.formatVersion)fail('format','未対応のバックアップ形式・バージョンです');
   const at=envelope.exportedAt;
   if(typeof at!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(at)||!Number.isFinite(Date.parse(at))||new Date(at).toISOString()!==at)fail('format','作成日時の形式が不正です');
   return freeze({exportedAt:at,data:checkedData(envelope.data)});
@@ -71,22 +72,25 @@ export async function readBackupFile(file){
 }
 export async function createBackup(data,now=new Date()){
   const exportedAt=now.toISOString(),clean=checkedData(data);
-  const bytes=new TextEncoder().encode(JSON.stringify({format:'my-schedule-backup',formatVersion:1,exportedAt,data:clean}));
+  const bytes=new TextEncoder().encode(JSON.stringify({format:'my-schedule-backup',formatVersion:clean.version,exportedAt,data:clean}));
   const decoded=decodeBackup(bytes); // Exports must pass the exact import conditions.
   const name='my-schedule-'+exportedAt.replace(/[:.]/g,'-')+'.json';
   return Object.freeze({id:newId(),file:new File([bytes],name,{type:'application/json'}),data:decoded.data,exportedAt,digest:await dataDigest(decoded.data)});
 }
 export function prepareRestore(data,day=dateKey()){
   const original=checkedData(data),candidate=structuredClone(original);
+  suspendLink(candidate);
   try{rollTasks(candidate,day);}catch{fail('date','現在日付が対応範囲外、または繰り越しを計算できません');}
   const raw=serializeState(candidate),byId=new Map(candidate.items.map(item=>[item.id,item]));
+  const recurrences=taskRecurrences(candidate,day);
   const changes=[];
+  const retained=[];
   for(const item of original.items)if(item.type==='task'){
     const after=byId.get(item.id);
-    if(!after)changes.push({title:item.title,before:item.due,after:null,reason:'完了済み・除外日を考慮すると、対応日付範囲内に次回が存在しません'});
-    else if(after.due!==item.due)changes.push({title:item.title,before:item.due,after:after.due,reason:'現在日付へ期限を繰り越します'});
+    if(after.due!==item.due)changes.push({title:item.title,before:item.due,after:after.due,reason:'現在日付へ期限を繰り越します'});
+    if(recurrences.get(item.id)?.due===null)retained.push({title:item.title,due:after.due});
   }
-  return freeze({day,candidate,raw,changes});
+  return freeze({day,candidate,raw,changes,retained});
 }
 export function counts(data){return {events:data.items.filter(item=>item.type==='event').length,tasks:data.items.filter(item=>item.type==='task').length,history:data.history.length};}
 export function createQuarantine(raw,now=new Date()){

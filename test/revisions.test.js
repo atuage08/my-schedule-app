@@ -127,8 +127,63 @@ test('long-gap event lookup checks only nearby occurrences',()=>{
   const e=event({start:MIN_DATE+'T12:00',end:MIN_DATE+'T13:00',repeat:'daily',excluded:exclusions});
   assert.ok(eventOn(e,MAX_DATE));assert.ok(calls<=2);
 });
-test('excluded upper-limit task exhausts safely',()=>{
-  const s=state([task({due:MAX_DATE,repeat:'daily',excluded:[MAX_DATE]})]);rollTasks(s,MAX_DATE);assert.equal(s.items.length,0);
+for(const [repeat,normal,final,today] of [
+  ['daily','2026-11-08',MAX_DATE,MAX_DATE],
+  ['weekly','2026-11-14','2100-12-25','2100-12-26'],
+  ['biweekly','2026-11-21','2100-12-18','2100-12-19'],
+  ['monthly','2026-12-07','2100-12-30',MAX_DATE],
+  ['yearly','2027-11-07','2100-11-07',MAX_DATE],
+])test(repeat+' advances normally and preserves the whole task when the range is exhausted',()=>{
+  const ordinary=state([task({repeat,due:'2026-11-07'})]);
+  rollTasks(ordinary,'2026-11-08');
+  assert.equal(ordinary.items[0].due,normal);
+  const retained=task({repeat,due:final,excluded:repeat==='daily'?[final]:[]});
+  const s=state([retained]);
+  const before=serializeState(s);
+  rollTasks(s,today);
+  assert.equal(serializeState(s),before);
+});
+
+test('final valid occurrence can complete and be restored on its due date',()=>{
+  const date=new Date(2100,11,31,12);
+  const s=state([task({due:MAX_DATE,repeat:'daily'})]);
+  complete(s,'task',date);
+  assert.equal(s.items.length,0);
+  assert.equal(s.history[0].due,MAX_DATE);
+  restore(s,s.history[0].id,date);
+  assert.equal(s.items[0].due,MAX_DATE);
+  assert.ok(s.history[0].restoredAt);
+});
+
+test('excluded or already completed retained occurrence cannot be completed again',()=>{
+  const date=new Date(2100,11,31,12);
+  const final=task({due:MAX_DATE,repeat:'daily'});
+  for(const excluded of [true,false]){
+    const s=state([structuredClone(final)]);
+    if(excluded)s.items[0].excluded=[MAX_DATE];
+    else{complete(s,'task',date);s.items.push(structuredClone(final));}
+    const before=serializeState(s);
+    rollTasks(s,MAX_DATE);
+    assert.equal(serializeState(s),before);
+    assert.throws(()=>complete(s,'task',date),/完了済みまたは除外済み/);
+    assert.equal(serializeState(s),before);
+    s.items[0].due='2100-12-30';
+    s.items[0].repeat='none';
+    rollTasks(s,MAX_DATE);
+    complete(s,'task',date);
+    assert.equal(s.items.length,0);
+  }
+});
+
+test('undo cannot claim success solely because an exhausted task is retained',()=>{
+  const date=new Date(2100,11,31,12);
+  const final=task({due:'2100-12-25',repeat:'weekly'});
+  const s=state([structuredClone(final)]);
+  complete(s,'task',new Date(2100,11,25,12));
+  s.items.push(final);
+  const before=serializeState(s);
+  assert.throws(()=>restore(s,s.history[0].id,date),/復元できる回がありません/);
+  assert.equal(serializeState(s),before);
 });
 test('auxiliary fields cannot hide unknown nested data',()=>{
   assert.throws(()=>validateItem(event({due:{nested:{}}})));

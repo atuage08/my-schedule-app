@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { PROJECT_ROOT, reviewFiles, readSource } from './files.mjs';
+import { PROJECT_ROOT, TOUCH_ICON, reviewFiles, readSource } from './files.mjs';
 
 // Heuristic screening only. Report categories and filenames, never matching secret values.
 export function screenText(text) {
@@ -21,6 +21,7 @@ export async function checkSources(root = PROJECT_ROOT) {
   const files = await reviewFiles(root);
   const findings = [];
   for (const name of files) {
+    if (name === TOUCH_ICON) continue; // Binary asset covered by the PNG build test.
     const text = (await readSource(root, name)).toString('utf8');
     for (const category of screenText(text)) findings.push(`${name}: ${category}`);
     if (/\.(?:m?js)$/.test(name)) {
