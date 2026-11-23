@@ -17,6 +17,12 @@ class Element {
   set innerHTML(value){throw Error('HTML parsing is forbidden');}
 }
 const document={createElement:tag=>new Element(tag),createTextNode:text=>new Text(text)};
+test('connection JSON textarea keeps HTML as a value and supports safe read-only display',()=>{
+  const {h}=createDom(document),payload='</textarea><script>window.injected=true</script>';
+  const field=h('textarea',{rows:5,value:payload,readOnly:true});
+  assert.equal(field.value,payload);assert.equal(field.readOnly,true);assert.equal(field.children.length,0);
+  assert.throws(()=>h('textarea',{onclick:'run()'}));
+});
 const payloads=['<img src=x onerror="alert(1)">','</input><svg onload="alert(1)">','&lt;script&gt;alert(1)&lt;/script&gt;','" autofocus onfocus="alert(1)" x="',"<script>alert('x')</script>",'日本語 & < > " \' 改行\n文字','javascript:alert(1)'];
 
 for(const payload of payloads)test('DOM creation treats attack/special text literally: '+payload.slice(0,25),()=>{

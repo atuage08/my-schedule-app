@@ -100,8 +100,40 @@ test('invalid browser JavaScript fails build before previous artifact is replace
   assert.equal(await readFile(join(root,'dist','keep.txt'),'utf8'),'previous build');
 });
 
-test('review selection excludes credentials, Git data, outputs, images and arbitrary data', async t => {
+test('home-screen icon is a bounded 180px PNG without ancillary chunks', async () => {
+  const name = 'apple-touch-icon-v1.png';
+  const html = (await readSource(PROJECT_ROOT, 'index.html')).toString('utf8');
+  assert.ok(html.includes('<link rel="apple-touch-icon" sizes="180x180" href="./' + name + '">'));
+  assert.deepEqual(PUBLIC_FILES.filter(file => file.endsWith('.png')), [name]);
+  const png = await readSource(PROJECT_ROOT, name);
+  assert.ok(png.length > 33 && png.length <= 64 * 1024);
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.equal(png.readUInt32BE(8), 13);
+  assert.equal(png.toString('ascii', 12, 16), 'IHDR');
+  assert.equal(png.readUInt32BE(16), 180);
+  assert.equal(png.readUInt32BE(20), 180);
+  let hasImageData = false;
+  for (let offset = 8; offset < png.length;) {
+    assert.ok(offset + 12 <= png.length);
+    const length = png.readUInt32BE(offset);
+    const kind = png.toString('ascii', offset + 4, offset + 8);
+    assert.ok(['IHDR', 'IDAT', 'IEND'].includes(kind));
+    offset += length + 12;
+    assert.ok(offset <= png.length);
+    if (kind === 'IDAT') hasImageData ||= length > 0;
+    if (kind === 'IEND') {
+      assert.equal(length, 0);
+      assert.equal(offset, png.length);
+      assert.ok(hasImageData);
+      return;
+    }
+  }
+  assert.fail('Missing PNG end chunk');
+});
+
+test('review selection includes the shipped icon and excludes incidental images and private data', async t => {
   const selected = await reviewFiles();
+  assert.ok(selected.includes('apple-touch-icon-v1.png'));
   const root = await fixture(t, selected);
   for (const file of ['.env', '.git/config', 'dist/index.html', 'node_modules/example/index.js', 'artifacts/old.zip', 'docs/screenshots/example.jpg', 'docs/session.json', 'src/.env.js']) {
     await mkdir(dirname(join(root, file)), { recursive: true });

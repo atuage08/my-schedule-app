@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ScheduleStore,LOCK_NAME,META_KEY,BACKUP_INTERVAL} from '../src/storage.js';
-import {STORAGE_KEY,seed,serializeState,complete} from '../src/model.js';
+import {STORAGE_KEY,seed,serializeState,complete,rollTasks} from '../src/model.js';
+import {bootNotificationStore,refreshNotificationStore} from '../src/notification-connection.js';
 import {createBackup,readBackupFile} from '../src/backup.js';
 class Memory{
   map=new Map();failWrite=false;failMeta=false;failRead=false;afterWriteRead=false;
@@ -18,6 +19,45 @@ async function setup({raw=serializeState(seed('2026-11-09')),storage=new Memory(
   await store.refresh();return {store,storage,locks,setTime(value){clock=new Date(value);},getTime(){return clock.getTime();}};
 }
 const approval={replace:true,emergency:true,quarantine:'skip'};
+
+test('startup, foreground refresh and unrelated event edits preserve an exhausted task',async()=>{
+  const data=seed('2026-11-09');
+  const retained={...data.items[2],due:'2100-11-01',repeat:'yearly'};
+  data.items=[data.items[0],retained];
+  const {store,storage,setTime}=await setup({raw:serializeState(data)});
+  setTime(new Date(2100,11,31,12));
+  for(const update of [bootNotificationStore,refreshNotificationStore]){
+    const result=await update(store,'');
+    assert.equal(result.ok,true);
+    assert.equal(result.committed,false);
+    assert.equal(storage.getItem(STORAGE_KEY),serializeState(data));
+  }
+  const result=await store.mutate(draft=>{
+    draft.items[0].title='別の架空予定を変更';
+    rollTasks(draft,'2100-12-31');
+  });
+  assert.equal(result.verified,true);
+  assert.deepEqual(JSON.parse(storage.getItem(STORAGE_KEY)).items[1],retained);
+});
+
+test('restore requests renewed approval when only the next-occurrence warning changes',async()=>{
+  const {store,storage,setTime}=await setup();
+  const data=seed('2026-11-09');
+  const retained={...data.items[2],due:'2100-12-30',repeat:'monthly',anchorDay:30,anchorMonth:12};
+  data.items=[retained];
+  setTime(new Date(2100,11,30,12));
+  const preview=store.preview(await readBackupFile((await createBackup(data)).file));
+  assert.equal(preview.plan.retained.length,0);
+  const before=storage.getItem(STORAGE_KEY);
+  setTime(new Date(2100,11,31,12));
+  const refreshed=await store.restore(preview,approval);
+  assert.equal(refreshed.reason,'date');
+  assert.equal(refreshed.preview.plan.raw,preview.plan.raw);
+  assert.equal(refreshed.preview.plan.retained.length,1);
+  assert.equal(storage.getItem(STORAGE_KEY),before);
+  assert.equal((await store.restore(refreshed.preview,approval)).verified,true);
+  assert.deepEqual(store.state.items,[retained]);
+});
 async function source(){return readBackupFile((await createBackup(seed('2026-11-09'),new Date('2026-11-09T03:00:00Z'))).file);}
 test('normal mutation saves verified data and marks first user change only after success',async()=>{
   const {store,storage}=await setup();assert.equal((await store.reminder()).kind,'unknown');

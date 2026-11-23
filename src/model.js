@@ -1,3 +1,5 @@
+import {NOTIFICATIONS_ENABLED,assertBasicMutation} from './features.js';
+import {validateLink,stageV3} from './notification-v3.js';
 export const STORAGE_KEY = 'my-schedule.prototype.v1';
 export const MIN_DATE = '2000-01-01';
 export const MAX_DATE = '2100-12-31';
@@ -81,7 +83,7 @@ function firstOnOrAfter(t, today, completed = new Set()) {
 }
 export function validateItem(x) {
   if (!x || !idValid(x.id) || typeof x.title !== 'string' || !x.title.trim() || x.title.length > 160) throw Error('名称を1〜160文字で入力してください');
-  knownKeys(x,['id','title','type','start','end','allDay','due','pinned','repeat','excluded','anchorDay','anchorMonth','seriesId','eventSeriesId','exceptionDate']);
+  knownKeys(x,['id','title','type','start','end','allDay','due','pinned','repeat','excluded','anchorDay','anchorMonth','seriesId','eventSeriesId','exceptionDate','notification']);
   if ([x.start,x.end].some(value=>value!==undefined&&(typeof value!=='string'||value.length>16))) throw Error('日時の形式が不正です');
   if ((x.due!==undefined&&x.due!==null&&!validDate(x.due)) || (x.pinned!==undefined&&typeof x.pinned!=='boolean') || (x.allDay!==undefined&&typeof x.allDay!=='boolean')) throw Error('項目の補助データが不正です');
   if (!['event','task'].includes(x.type)) throw Error('項目の形式が不正です');
@@ -101,12 +103,38 @@ export function validateItem(x) {
   if (x.eventSeriesId !== undefined && (x.type !== 'event' || !idValid(x.eventSeriesId))) throw Error('予定シリーズIDが不正です');
   if (x.exceptionDate !== undefined && (x.type !== 'event' || !validDate(x.exceptionDate) || !x.eventSeriesId || x.eventSeriesId === x.id || x.repeat !== 'none')) throw Error('例外予定の関連付けが不正です');
   if (x.eventSeriesId !== undefined && x.eventSeriesId !== x.id && x.exceptionDate === undefined) throw Error('例外予定の元の日付が必要です');
+  if(Object.hasOwn(x,'notification')){
+    if(x.type!=='event'||x.repeat!=='none'||x.eventSeriesId!==undefined||x.exceptionDate!==undefined)throw Error('通知設定は通常予定だけに対応します');
+    validateNotification(x.notification);
+  }
   return x;
 }
+export function validateNotification(value){
+  if(!value||Array.isArray(value)||Object.keys(value).sort().join(',')!=='enabled,notifyAt'||typeof value.enabled!=='boolean')throw Error('通知設定の形式が不正です');
+  if(!value.enabled){if(value.notifyAt!==null)throw Error('通知なしの日時は空にしてください');return value;}
+  if(typeof value.notifyAt!=='string'||!/^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/.test(value.notifyAt))throw Error('通知日時が不正です');
+  const date=new Date(value.notifyAt);
+  if(!Number.isFinite(date.getTime())||date.toISOString()!==value.notifyAt)throw Error('通知日時が不正です');
+  return value;
+}
+export function notificationSettings(item){return item.notification===undefined?{enabled:false,notifyAt:null}:{...validateNotification(item.notification)};}
+export function notificationFromLocal(enabled,value,previous,now=new Date()){
+  if(typeof enabled!=='boolean')throw Error('通知の有無を確認してください');
+  if(!enabled)return {enabled:false,notifyAt:null};
+  if(typeof value!=='string'||!/^20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value))throw Error('通知日時を指定してください');
+  const date=new Date(value);
+  if(!Number.isFinite(date.getTime())||stamp(date)!==value)throw Error('通知日時が不正です');
+  const result=validateNotification({enabled:true,notifyAt:date.toISOString()});
+  if(!Number.isFinite(now.getTime())||(date<=now&&previous?.notifyAt!==result.notifyAt))throw Error('通知日時は未来を指定してください');
+  return result;
+}
 export function validateState(s) {
-  if (!s || s.version !== 1 || !Array.isArray(s.items) || !Array.isArray(s.history) || s.items.length > LIMITS.items || s.history.length > LIMITS.history) throw Error('保存形式が不正、または保存件数の上限です');
-  knownKeys(s,['version','items','history']);
+  if (!s || ![1,2,3].includes(s.version) || !Array.isArray(s.items) || !Array.isArray(s.history) || s.items.length > LIMITS.items || s.history.length > LIMITS.history) throw Error('保存形式が不正、または保存件数の上限です');
+  knownKeys(s,s.version===3?['version','items','history','notificationLink']:['version','items','history']);
+  if(s.version===3)validateLink(s.notificationLink);
   s.items.forEach(validateItem);
+
+  if(s.version===1&&s.items.some(item=>Object.hasOwn(item,'notification')))throw Error('通知設定には保存形式v2が必要です');
   if (new Set(s.items.map(x=>x.id)).size !== s.items.length) throw Error('IDが重複しています');
   const byId=new Map(s.items.map(item=>[item.id,item])), slots=new Set();
   for(const item of s.items) if(item.exceptionDate!==undefined){
@@ -134,37 +162,64 @@ export function validateState(s) {
   if (exclusions > LIMITS.totalExcluded) throw Error('繰り返しの除外データが多すぎます');
   return s;
 }
+function validateNotificationState(s){
+  if(s.version===3)for(const record of s.notificationLink.records){
+    const item=s.items.find(item=>item.id===record.itemId),d=record.desired;
+    if(d.enabled&&(!item||item.type!=='event'||item.repeat!=='none'||!item.notification?.enabled||item.title!==d.title||item.notification.notifyAt!==d.notifyAt)||!d.enabled&&item?.notification?.enabled)throw Error('通知希望と予定が一致しません');
+  }
+  return s;
+}
 export function parseState(raw) {
   if (typeof raw !== 'string' || raw.length > LIMITS.storageChars) throw Error('保存データが大きすぎます');
-  return validateState(JSON.parse(raw));
+  return validateNotificationState(validateState(JSON.parse(raw)));
 }
 export function serializeState(state) {
-  validateState(state);
+  validateNotificationState(validateState(state));
   const raw = JSON.stringify(state);
   if (raw.length > LIMITS.storageChars) throw Error('保存容量の上限です。データは変更していません');
   return raw;
 }
-export function rollTasks(state, today = dateKey()) {
-  if (!validDate(today)) throw Error('日付が範囲外です');
-  validateState(state);
+function completedTaskDates(state) {
   const completed=new Map();
   for(const h of state.history) if(h.task&&h.task.repeat!=='none'&&!h.restoredAt){
     if(!completed.has(h.seriesId))completed.set(h.seriesId,new Set());
     completed.get(h.seriesId).add(h.due);
   }
-  const exhausted = new Set();
+  return completed;
+}
+export function taskRecurrences(state, today = dateKey()) {
+  const results = new Map();
+  if (!validDate(today)) return results;
+  const completed = completedTaskDates(state);
   for (const t of state.items) if (t.type === 'task' && t.repeat !== 'none') {
-    t.anchorDay ??= Number(t.due.slice(8)); t.anchorMonth ??= Number(t.due.slice(5,7));
-    const due = firstOnOrAfter(t, today, completed.get(t.seriesId||t.id));
-    if (due === null) exhausted.add(t.id); else t.due = due;
+    const dates = completed.get(t.seriesId || t.id);
+    results.set(t.id, {
+      due: firstOnOrAfter(t, today, dates),
+      blocked: t.excluded.includes(t.due) || dates?.has(t.due) === true,
+    });
   }
-  state.items = state.items.filter(t=>!exhausted.has(t.id));
+  return results;
+}
+export function rollTasks(state, today = dateKey()) {
+  if (!validDate(today)) throw Error('日付が範囲外です');
+  validateState(state);
+  const recurrences = taskRecurrences(state, today);
+  for (const task of state.items) {
+    const due = recurrences.get(task.id)?.due;
+    if (!due) continue;
+    task.anchorDay ??= Number(task.due.slice(8));
+    task.anchorMonth ??= Number(task.due.slice(5,7));
+    task.due = due;
+  }
   return state;
 }
 function completeDraft(state, id, now) {
   validateState(state);
   const t = state.items.find(x=>x.id === id);
   if (!t || t.type !== 'task') return;
+  if (t.repeat !== 'none' && (t.excluded.includes(t.due) || completedTaskDates(state).get(t.seriesId || t.id)?.has(t.due))) {
+    throw Error('完了済みまたは除外済みの回は完了できません');
+  }
   if (state.history.length >= LIMITS.history) throw Error('完了履歴の保存上限です');
   const snapshot = structuredClone(t);
   const history = {id:newId(), title:t.title, due:t.due, completedAt:now.toISOString(), sourceId:t.id, seriesId:t.seriesId||t.id, task:snapshot};
@@ -191,7 +246,10 @@ function restoreDraft(state, historyId, now) {
   h.restoredAt=now.toISOString();
   // A recurring series retains one latest incomplete task; don't rewind another occurrence.
   rollTasks(state,dateKey(now));
-  if (!state.items.some(x=>x.type==='task' && (x.id===h.sourceId || (x.seriesId||x.id)===h.seriesId))) throw Error('日付範囲内に復元できる回がありません');
+  const restored = state.items.find(x=>x.type==='task' && (x.id===h.sourceId || (x.seriesId||x.id)===h.seriesId));
+  if (!restored || (restored.repeat !== 'none' && firstOnOrAfter(restored, dateKey(now), completedTaskDates(state).get(restored.seriesId || restored.id)) === null)) {
+    throw Error('日付範囲内に復元できる回がありません');
+  }
   return h;
 }
 export function eventOn(item, day) {
@@ -289,9 +347,13 @@ function transaction(state, action) {
   validateState(state);
   const draft=structuredClone(state);
   const result=action(draft);
+  assertBasicMutation(state,draft);
+  if(NOTIFICATIONS_ENABLED&&draft.version===3)stageV3(state,draft);
   serializeState(draft);
   state.items=draft.items;
   state.history=draft.history;
+  state.version=draft.version;
+  if(draft.version===3)state.notificationLink=draft.notificationLink;
   return result;
 }
 export function complete(state,id,now=new Date()) { return transaction(state,draft=>completeDraft(draft,id,now)); }

@@ -2,6 +2,47 @@ import { MIN_DATE, MAX_DATE } from './model.js';
 // Hours use direct numeric input; minutes remain a compact selector.
 const padded = n => String(n).padStart(2, '0');
 
+// A date-only value is a calendar day, not an instant in the device time zone.
+export function dateHint(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value < MIN_DATE || value > MAX_DATE) return '';
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return '';
+  return value.replaceAll('-', '/') + '（' + '日月火水木金土'[date.getUTCDay()] + '）';
+}
+
+const dateHints = new WeakMap();
+function refreshDateHint(input) {
+  const hint = dateHints.get(input);
+  if (hint) {
+    hint.textContent = input.validity.valid ? dateHint(input.value) : '';
+    hint.hidden = !hint.textContent;
+  }
+}
+
+export function enhanceDateFields(form) {
+  const inputs = [...form.querySelectorAll('input[type="date"]')];
+  for (const input of inputs) {
+    if (dateHints.has(input)) continue;
+    if (!input.parentElement.classList.contains('date-time-control')) {
+      const group = input.ownerDocument.createElement('span');
+      group.className = 'date-input-control';
+      input.before(group);
+      group.append(input);
+    }
+    const hint = input.ownerDocument.createElement('span');
+    hint.className = 'date-hint';
+    hint.id = 'date-hint-' + (input.name || input.getAttribute('aria-label'));
+    input.setAttribute('aria-describedby', [input.getAttribute('aria-describedby'), hint.id].filter(Boolean).join(' '));
+    input.after(hint);
+    dateHints.set(input, hint);
+    for (const event of ['input', 'change']) input.addEventListener(event, () => refreshDateHint(input));
+  }
+  const refresh = () => inputs.forEach(refreshDateHint);
+  refresh();
+  return {refresh};
+}
+
 export function enhanceTimeFields(form) {
   let precise = ['start', 'end'].some(name => Number(form.elements[name].value.slice(-2)) % 10 !== 0);
   const controls = [];
@@ -33,6 +74,7 @@ export function enhanceTimeFields(form) {
     const refresh = () => {
       const value = source.value;
       date.value = value.slice(0, 10);
+      refreshDateHint(date);
       hour.value = String(Number(value.slice(11, 13)));
       const current = Number(value.slice(-2));
       const minutes = Array.from({length: precise ? 60 : 6}, (_, i) => i * (precise ? 1 : 10));

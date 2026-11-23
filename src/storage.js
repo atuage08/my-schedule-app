@@ -1,12 +1,31 @@
+import {NOTIFICATIONS_ENABLED,assertBasicMutation} from './features.js';
+import {stageV3,needsV3} from './notification-v3.js';
 import {STORAGE_KEY,parseState,serializeState,seed,rollTasks,dateKey} from './model.js';
 import {checkedData,createBackup,createQuarantine,prepareRestore,dataDigest,freeze} from './backup.js';
+import {stageRemovals,commitRemovals,readRemovals} from './notification-removals.js';
 
 export const LOCK_NAME='my-schedule.data-write.v1';
 export const META_KEY='my-schedule.backup-meta.v1';
+export const MIGRATION_KEY='my-schedule.pre-v2.v1';
+export const MIGRATION_V3_KEY='my-schedule.pre-v3.v1';
+export const MIGRATION_LIMITS=Object.freeze({entries:3,chars:4000000});
 export const BACKUP_INTERVAL=336*60*60*1000;
 const messages={conflict:'データが変更されました。読み直してから確認をやり直してください',blocked:'保存を停止しています。バックアップ・緊急復旧を確認してください',locks:'Web Locksを利用できないため書き込みを停止しています',save:'保存できませんでした。元データは変更していません',unverified:'書き込みを試みましたが、保存先の状態を確認できず成否は不確定です。この画面では追加の保存・復元を停止します。再読み込み前に保持中の元データを退避してください',busy:'保存処理中です。完了を待ってください',date:'日付と復元候補を再確認してください'};
 const error=reason=>Object.assign(Error(messages[reason]||'処理を完了できませんでした'),{reason});
 messages['retention-limit']='過去の保持対象が上限（8件・合計32MiB）に達するため、新しい上書きを停止しました。保持対象を退避してからページの扱いを判断してください。自動破棄はしません';
+messages.migration='移行前原本を退避・確認できないため移行を停止しました。本体の書き込みは行っていません。バックアップ画面を確認してください';
+function parseMigration(raw,versions=[1]){
+  if(raw===null)return {version:1,entries:[]};
+  if(typeof raw!=='string'||raw.length>MIGRATION_LIMITS.chars)throw error('migration');
+  const value=JSON.parse(raw);
+  if(!value||Object.keys(value).sort().join(',')!=='entries,version'||value.version!==1||!Array.isArray(value.entries)||value.entries.length>MIGRATION_LIMITS.entries)throw error('migration');
+  const seen=new Set();
+  for(const entry of value.entries){
+    if(!entry||Object.keys(entry).sort().join(',')!=='capturedAt,raw'||typeof entry.capturedAt!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(entry.capturedAt)||!Number.isFinite(Date.parse(entry.capturedAt))||new Date(entry.capturedAt).toISOString()!==entry.capturedAt||!versions.includes(parseState(entry.raw).version)||seen.has(entry.raw))throw error('migration');
+    seen.add(entry.raw);
+  }
+  return value;
+}
 const emptyMeta=()=>({version:1,engaged:null,confirmed:null});
 export function parseMeta(raw){
   if(raw===null)return emptyMeta();
@@ -66,6 +85,34 @@ export class ScheduleStore{
   }
   _write(raw,{recovery=false}={}){
     if(this.protection)return {ok:false,committed:false,reason:'unverified',message:messages.unverified};
+    // Called only inside the common write lock, after the current baseline check.
+    // Never overwrite or discard an earlier preimage to make room for a migration.
+    if(parseState(raw).version>=2&&this.observation==='valid'&&parseState(this.raw).version===1){
+      try{
+        const previous=this.storage.getItem(MIGRATION_KEY),archive=parseMigration(previous);
+        if(!archive.entries.some(entry=>entry.raw===this.raw)){
+          if(archive.entries.length>=MIGRATION_LIMITS.entries)throw error('migration');
+          archive.entries.push({raw:this.raw,capturedAt:this.now().toISOString()});
+          const encoded=JSON.stringify(archive);if(encoded.length>MIGRATION_LIMITS.chars)throw error('migration');
+          this.storage.setItem(MIGRATION_KEY,encoded);
+          if(this.storage.getItem(MIGRATION_KEY)!==encoded)throw error('migration');
+        }
+        // Recheck after archive I/O as well; do not overwrite an intervening writer.
+        if(this.storage.getItem(STORAGE_KEY)!==this.raw)throw error('migration');
+      }catch{return {ok:false,committed:false,reason:'migration',message:messages.migration};}
+    }
+    if(parseState(raw).version===3&&this.observation==='valid'&&parseState(this.raw).version<3){
+      try{
+        const archive=parseMigration(this.storage.getItem(MIGRATION_V3_KEY),[1,2]);
+        if(!archive.entries.some(entry=>entry.raw===this.raw)){
+          if(archive.entries.length>=MIGRATION_LIMITS.entries)throw error('migration');
+          archive.entries.push({raw:this.raw,capturedAt:this.now().toISOString()});
+          const encoded=JSON.stringify(archive);if(encoded.length>MIGRATION_LIMITS.chars)throw error('migration');
+          this.storage.setItem(MIGRATION_V3_KEY,encoded);if(this.storage.getItem(MIGRATION_V3_KEY)!==encoded)throw error('migration');
+        }
+        if(this.storage.getItem(STORAGE_KEY)!==this.raw)throw error('migration');
+      }catch{return {ok:false,committed:false,reason:'migration',message:messages.migration};}
+    }
     try{this.storage.setItem(STORAGE_KEY,raw);}catch{return {ok:false,committed:false,reason:'save',message:messages.save};}
     try{
       const saved=this.storage.getItem(STORAGE_KEY);
@@ -91,19 +138,29 @@ export class ScheduleStore{
     try{return await this._lock(action);}catch(cause){return {ok:false,committed:false,reason:cause.reason||'blocked',message:messages[cause.reason]||messages.blocked};}
     finally{this.busy=false;}
   }
-  async mutate(action,base=this.token(),{user=true}={}){
+  async mutate(action,base=this.token(),{user=true,queueRemovals=false,notificationV3=false}={}){
     if(this.status!=='ready')return {ok:false,reason:'blocked',message:messages.blocked};
-    let raw;
-    try{const draft=structuredClone(this.state);action(draft);raw=serializeState(draft);}catch{return {ok:false,reason:'validation',message:'変更を検証できません。入力と保存上限を確認してください'};}
+    let raw,draft;
+    try{draft=structuredClone(this.state);action(draft);assertBasicMutation(this.state,draft);raw=NOTIFICATIONS_ENABLED&&notificationV3?null:serializeState(draft);}catch(cause){return {ok:false,reason:cause?.code==='notification-protected'?'notification-protected':'validation',message:cause?.code==='notification-protected'?cause.message:'変更を検証できません。入力と保存上限を確認してください'};}
     return this._operation(()=>{
       this._check(base);
+      if(NOTIFICATIONS_ENABLED&&notificationV3){try{if(needsV3(this.state,draft))stageV3(this.state,draft,this.state.version===3?[]:readRemovals(this.storage).value.entries);raw=serializeState(draft);}catch{return {ok:false,committed:false,reason:'notification-v3',message:'通知連携情報を検証・保持できないため保存を停止しました'};}}
       if(raw===serializeState(this.state))return {ok:true,committed:false,verified:true};
+      let removalPlan=null;
+      if(NOTIFICATIONS_ENABLED&&queueRemovals&&draft.version!==3){
+        try{removalPlan=stageRemovals(this.storage,this.state,parseState(raw),this.now());}
+        catch{return {ok:false,committed:false,reason:'removals',message:'解除対象IDを保存確認できないため、アプリ内の変更も停止しました。解除待ち領域・容量を確認してください'};}
+        // Queue I/O must not hide an intervening data change.
+        this._check(base);
+      }
       const result=this._write(raw);
-      if(result.ok&&user){this.engagedInSession=true;result.warning=this._metadata(meta=>({...meta,engaged:true}));}
+      if(result.ok&&removalPlan){try{commitRemovals(this.storage,removalPlan);}catch{result.warning='アプリ内の保存は完了しましたが、解除待ちの確定を確認できません。対象IDは保持し、解除連携を停止しています';}}
+      if(result.ok&&user){this.engagedInSession=true;result.warning=[result.warning,this._metadata(meta=>({...meta,engaged:true}))].filter(Boolean).join('。')||null;}
       return result;
     });
   }
   async rollover(){return this.mutate(draft=>rollTasks(draft,dateKey(this.now())),this.token(),{user:false});}
+  removalStatus(){try{return {entries:readRemovals(this.storage).value.entries,unavailable:false};}catch{return {entries:[],unavailable:true};}}
   async backup(){
     // A single read fixes the snapshot, even when write locks are unavailable.
     const read=()=>{
@@ -113,6 +170,19 @@ export class ScheduleStore{
     };
     const data=this.locks?.request?await this._lock(read):read();
     return createBackup(data,this.now());
+  }
+  migrationStatus(v3=false){
+    try{return {entries:parseMigration(this.storage.getItem(v3?MIGRATION_V3_KEY:MIGRATION_KEY),v3?[1,2]:[1]).entries.map((entry,index)=>({index,capturedAt:entry.capturedAt})),unavailable:false};}
+    catch{return {entries:[],unavailable:true};}
+  }
+  async migrationBackup(index,v3=false){
+    if(!Number.isInteger(index)||index<0)throw error('migration');
+    const read=()=>{
+      const entry=parseMigration(this.storage.getItem(v3?MIGRATION_V3_KEY:MIGRATION_KEY),v3?[1,2]:[1]).entries[index];
+      if(!entry)throw error('migration');return {data:parseState(entry.raw),capturedAt:entry.capturedAt};
+    };
+    const entry=this.locks?.request?await this._lock(read):read();
+    return Object.freeze({...await createBackup(entry.data,this.now()),purpose:'migration',sourceVersion:entry.data.version,capturedAt:entry.capturedAt});
   }
   preview(source,base=this.token()){
     if(!this.matches(base)||!['ready','corrupt','missing'].includes(this.status))throw error('conflict');
@@ -125,7 +195,7 @@ export class ScheduleStore{
       this._check(preview.base);
       if(!['ready','corrupt','missing'].includes(this.status))throw error('blocked');
       const plan=prepareRestore(preview.sourceData,dateKey(this.now()));
-      if(plan.raw!==preview.plan.raw)return {ok:false,reason:'date',message:messages.date,preview:this.preview({data:preview.sourceData,exportedAt:preview.exportedAt},preview.base)};
+      if(plan.raw!==preview.plan.raw||JSON.stringify(plan.retained)!==JSON.stringify(preview.plan.retained))return {ok:false,reason:'date',message:messages.date,preview:this.preview({data:preview.sourceData,exportedAt:preview.exportedAt},preview.base)};
       const recoveryTarget=preview.emergency&&typeof preview.base.raw==='string'?{raw:preview.base.raw,capturedAt:this.now().toISOString()}:null;
       // Bound failed-attempt retention without ever evicting an older target.
       // Refuse a new write if keeping its preimage would exceed the budget.

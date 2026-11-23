@@ -32,7 +32,7 @@ try{
   const form=document.querySelector('#entry-form');form.elements.title.value='架空ブラウザ登録';form.requestSubmit();
   await wait(()=>!document.querySelector('#editor').open);
   verify(JSON.parse(localStorage.getItem(STORAGE_KEY)).items.length===initial.items.length+1);
-  verify(document.querySelector('#notice').textContent==='保存しました');
+  verify(document.querySelector('#notice').textContent==='保存と読み戻し確認が完了しました');
   const entry=JSON.parse(localStorage.getItem(STORAGE_KEY)).items.find(item=>item.title==='架空ブラウザ登録');
   document.querySelector(`[data-edit="${entry.id}"]`).click();
   const edit=document.querySelector('#entry-form');edit.elements.title.value='架空ブラウザ編集';edit.requestSubmit();
@@ -53,7 +53,7 @@ try{
   await a.refresh();await b.refresh();const concurrent=await Promise.all([a.mutate(d=>{d.items[0].title='架空の競合A';}),b.mutate(d=>{d.items[0].title='架空の競合B';})]);
   verify(concurrent.filter(result=>result.ok).length===1);verify(concurrent.some(result=>result.reason==='conflict'));
   window.dispatchEvent(new StorageEvent('storage',{key:STORAGE_KEY}));await wait(()=>document.body.textContent.includes('架空の競合A')||document.body.textContent.includes('架空の競合B'));
-  action('バックアップ・復元');action('保存済みデータのJSONを準備');
+  document.querySelector('#backup-open').click();action('保存済みデータのJSONを準備');
   await wait(()=>buttons().some(b=>b.textContent==='このJSONファイルを保存できました'&&!b.disabled));
   verify(JSON.parse(localStorage.getItem(META_KEY)).confirmed===null);
   verify(buttons().some(b=>b.textContent==='ダウンロードで保存'&&!b.disabled));
@@ -88,7 +88,7 @@ try{
   // Corruption is test-owned, only within this unique temporary origin.
   action('閉じる');localStorage.setItem(STORAGE_KEY,'{browser-corrupt');
   window.dispatchEvent(new StorageEvent('storage',{key:STORAGE_KEY,newValue:'a delayed value'}));
-  await wait(()=>document.querySelector('#add').disabled);action('バックアップ・復元');
+  await wait(()=>document.querySelector('#add').disabled);document.querySelector('#backup-open').click();
   verify(document.querySelector('#backup-panel').textContent.includes('破損・検証エラー'));
   step='emergency-select';await select(artifact.file);step='emergency-acknowledgments';
   document.querySelector('#replace-ack').click();document.querySelector('#loss-ack').click();
@@ -98,13 +98,13 @@ try{
   verify(JSON.parse(localStorage.getItem(STORAGE_KEY)).history.length===expectedHistory);
   verify(!document.querySelector('#add').disabled);
   step='new-corruption-after-success';action('閉じる');const afterSuccessB='{browser-B-after-success';localStorage.setItem(STORAGE_KEY,afterSuccessB);
-  window.dispatchEvent(new StorageEvent('storage',{key:STORAGE_KEY}));await wait(()=>document.querySelector('#add').disabled);action('バックアップ・復元');
+  window.dispatchEvent(new StorageEvent('storage',{key:STORAGE_KEY}));await wait(()=>document.querySelector('#add').disabled);document.querySelector('#backup-open').click();
   action('現在の破損データの退避ファイルを準備');await wait(binReady);
   const currentB=await captureQuarantine();verify(currentB.text===afterSuccessB);verify(currentB.file.name.includes('current'));verify(!document.querySelector('.retained-targets'));
   // Simulate one failed verification read on this isolated origin, then let
   // later reads succeed. Neither visibility nor backup may unlock the page.
   step='unverified-recovery';action('閉じる');const originalRaw='{browser-original-corrupt\ud800';localStorage.setItem(STORAGE_KEY,originalRaw);
-  window.dispatchEvent(new StorageEvent('storage',{key:STORAGE_KEY}));await new Promise(resolve=>setTimeout(resolve,100));await wait(()=>document.querySelector('#add').disabled);action('バックアップ・復元');await select(artifact.file);
+  window.dispatchEvent(new StorageEvent('storage',{key:STORAGE_KEY}));await new Promise(resolve=>setTimeout(resolve,100));await wait(()=>document.querySelector('#add').disabled);document.querySelector('#backup-open').click();await select(artifact.file);
   const originalGet=Storage.prototype.getItem,originalSet=Storage.prototype.setItem;let failNext=false,dataWrites=0;
   Storage.prototype.setItem=function(key,value){const result=originalSet.call(this,key,value);if(key===STORAGE_KEY){dataWrites++;failNext=true;}return result;};
   Storage.prototype.getItem=function(key){if(key===STORAGE_KEY&&failNext){failNext=false;throw Error('test verification failure');}return originalGet.call(this,key);};

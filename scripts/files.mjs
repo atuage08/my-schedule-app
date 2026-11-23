@@ -3,8 +3,9 @@ import { fileURLToPath } from 'node:url';
 import { protectedSource } from './secure-source.mjs';
 
 export const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const PUBLIC_FILES = ['index.html', 'styles.css', 'src/app.js', 'src/model.js', 'src/time-controls.js', 'src/dom.js', 'src/backup.js', 'src/storage.js', 'src/backup-ui.js', 'src/upgrade-notice.js'];
-const ROOT_FILES = ['.gitignore', 'package.json', 'index.html', 'styles.css', 'server.mjs', 'README.md'];
+export const TOUCH_ICON = 'apple-touch-icon-v1.png';
+export const PUBLIC_FILES = ['index.html', 'styles.css', TOUCH_ICON, 'src/app.js', 'src/features.js', 'src/shortcut-test.js', 'src/notification-removals.js', 'src/notification-v3.js', 'src/notification-connection.js', 'src/notification-connection-ui.js', 'src/model.js', 'src/time-controls.js', 'src/dom.js', 'src/backup.js', 'src/storage.js', 'src/backup-ui.js', 'src/upgrade-notice.js'];
+const ROOT_FILES = ['.gitignore', 'package.json', 'index.html', 'styles.css', TOUCH_ICON, 'server.mjs', 'README.md'];
 const SOURCE_DIRS = { src: ['.js'], scripts: ['.mjs', '.ps1'], test: ['.js'], docs: ['.md'], '.github/workflows': ['.yml'] };
 
 // Reject links/junctions as well as paths outside this checkout, including parent links.

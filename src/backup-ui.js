@@ -1,4 +1,5 @@
 import {createDom} from './dom.js';
+import {NOTIFICATIONS_ENABLED} from './features.js';
 import {readBackupFile,counts} from './backup.js';
 
 export function createBackupUI({store,onChange,notify}){
@@ -28,6 +29,7 @@ export function createBackupUI({store,onChange,notify}){
     const expiredCurrent=isQuarantine&&item.source==='current'&&item.targetId!==store.quarantineInfo().id;
     let shareable=false;try{shareable=!!navigator.canShare?.({files:[item.file]});}catch{/* Download stays available. */}
     return h('section',{class:'file-actions'},hint(item.file.name),
+      item.purpose==='migration'&&hint('移行前v'+(item.sourceVersion||1)+'の保持原本から作成したバックアップです。取得時点：'+item.capturedAt+'。現在のv'+(store.state?.version||'新')+'データではありません。'),
       isQuarantine&&hint((item.source==='current'?(expiredCurrent?'以前に準備したスナップショット（現在ではありません。保存操作は停止します）':'退避直前に照合した現在の破損スナップショット'):'過去の復旧直前の保持対象（現在の破損データではありません）')+`：${item.targetId}、取得 ${item.capturedAt}、照合 ${item.checkedAt}`),
       isQuarantine&&hint(item.source==='retained'?(item.currentMatch===null?'保存先を読めず現在との一致は確認できません。保持した取得時点の内容だけを出力します。':item.currentMatch?'準備時点では保存先と同じ内容でしたが、過去の保持対象として出力します。':'準備時点の保存先とは異なります。現在データとは別の保持対象です。'):'保存直前にも照合します。一致しない場合は保存を止めます。照合後の別画面の変更までは保証しません。'),
       button('共有して「ファイル」に保存',()=>{
@@ -40,6 +42,7 @@ export function createBackupUI({store,onChange,notify}){
       button(isQuarantine?'この退避ファイルを保存できました':'このJSONファイルを保存できました',()=>work(async()=>{
         if(!checkQuarantine(item,isQuarantine))return;
         if(isQuarantine){quarantineSaved=true;message='この退避ファイルの保存確認を受け付けました';}
+        else if(item.purpose==='migration'){message='移行前v1ファイルの保存確認を受け付けました。現在データのバックアップ保存確認日時は更新していません';}
         else{const result=await store.confirmBackup(item);message=result.ok?'このファイルの保存確認日時を記録しました。準備後の変更は含まれません':result.message;}
       }),busy),
       hint('共有キャンセルやダウンロード開始だけでは、保存確認日時を更新しません。保存先はご自身で確認してください。'));
@@ -48,6 +51,8 @@ export function createBackupUI({store,onChange,notify}){
     const emergency=store.status!=='ready';
     const protectedOutcome=!!store.protection,current=store.quarantineInfo(),retained=store.retainedQuarantineInfo();
     const receipt=store.backupStatus();
+    const migration=store.migrationStatus();
+    const migrationV3=store.migrationStatus(true);
     const chooser=h('input',{type:'file',accept:'.json,application/json',id:'backup-file',disabled:busy,'aria-label':'復元するJSONファイル'});
     chooser.onchange=()=>{
       const file=chooser.files?.[0];if(!file)return;
@@ -62,6 +67,11 @@ export function createBackupUI({store,onChange,notify}){
     };
     const panels=[h('div',{class:'sheet-heading'},h('h2',{id:'backup-title'},'バックアップ・復元'),button('閉じる',()=>dialog.close(),busy)),
       hint('初回利用時は旧版のタブとホーム画面版をすべて閉じ、新版を開き直してください。旧版は同じロックに参加しません。'),
+      hint(NOTIFICATIONS_ENABLED?'通知設定を含むv2のデータ・バックアップは旧版では読めません。旧v1への全置換では通知設定も失われます。復元や解除でApple側のリマインダーは変更されません。':'基本機能先行版は通知を送受信しません。既存v2/v3の通知情報付き項目は閲覧・バックアップのみ可能です。通知情報を自動削除しません。'),
+      hint('v1〜v3のバックアップに対応します。v3復元では従来の安全処理として依頼を保留化します。Apple側の状態は変更せず、一致も仮定しません。古いバックアップへの全置換では、その後の通知情報も残りません。'),
+      h('section',{},h('h3',{},'v3移行前の保護原本'),migrationV3.unavailable?hint('v3移行前の保持領域を確認できません。削除・初期化しません。'):migrationV3.entries.map(entry=>button('v3移行前原本 '+(entry.index+1)+' のJSONを準備',()=>work(async()=>{artifact=await store.migrationBackup(entry.index,true);message='v3移行前のJSONを準備しました。現在データとは別です';}),busy))),
+      h('section',{},h('h3',{},'移行前v1の保護'),hint('移行前に通常のJSONも「ファイル」等へ保存してください。内部退避はサイトデータ削除では失われます。保持は最大3原本・合計400万文字で、自動削除しません。'),
+        migration.unavailable?hint('移行前の保持領域を確認できません。既存の退避内容は削除しません。'):migration.entries.length?migration.entries.map(entry=>button('移行前v1原本 '+(entry.index+1)+' のJSONを準備',()=>work(async()=>{artifact=await store.migrationBackup(entry.index);message='移行前v1のJSONを準備しました。現在の設定・履歴とは別の過去のデータです';}),busy)):hint('移行前v1の保持原本はまだありません。')),
       hint('予定・タスクと90日より前を含む全完了履歴を扱います。JSONは平文です。アプリから外部送信しませんが、iCloud等の保存先では同期される場合があります。'),
       hint(receipt.kind==='confirmed'?'前回の明示的な保存確認：'+new Date(receipt.at).toLocaleString('ja-JP',{hour12:false}):receipt.kind==='unknown'?'保存確認記録がないか、確認できません。バックアップ済みとは判定していません。':'バックアップの保存確認はまだありません。'),
       h('p',{role:'status',class:'backup-status'},'保存状態：'+({ready:'正常',corrupt:'破損・検証エラー',missing:'保存キーがありません',unavailable:'保存領域を読み取れません',unverified:'書き込み後の確認が未完了'}[store.status]||'確認中')),
@@ -102,8 +112,9 @@ export function createBackupUI({store,onChange,notify}){
         h('p',{},'現在：'+(store.state?describe(store.state):'確認不能')),
         h('p',{},'元バックアップ：'+describe(preview.sourceData)),h('p',{},'復元後の候補：'+describe(plan.candidate)),
         hint('繰り越し基準日：'+plan.day),
-        h('p',{},`期限変更 ${plan.changes.filter(change=>change.after).length}件・次回がなく除かれるタスク ${plan.changes.filter(change=>!change.after).length}件`),
-        plan.changes.map(change=>h('p',{class:'rollover-change'},change.title,h('br'),`${change.before} → ${change.after||'保存候補から除外'}：${change.reason}`)),
+        h('p',{},`期限変更 ${plan.changes.length}件・対応範囲内に次回がなく保持するタスク ${plan.retained.length}件`),
+        plan.changes.map(change=>h('p',{class:'rollover-change'},change.title,h('br'),`${change.before} → ${change.after}：${change.reason}`)),
+        plan.retained.map(item=>h('p',{class:'rollover-change'},item.title,h('br'),`${item.due}：対応範囲内に次回なし。元の期限で保持します。`)),
         h('p',{class:'error'},'予定・タスク・完了履歴をすべて置き換えます。マージはしません。このバックアップ以後の変更と履歴は残りません。履歴は期限削除しませんが、件数・容量上限があります。'),
         stale&&h('p',{class:'error'},'確認中に現在データが変わりました。ファイルを選び直してください。'),
         h('label',{class:'backup-check'},ack,' 現在データをすべて置き換えることを確認しました'),

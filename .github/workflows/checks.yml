@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: '24'
       - run: node scripts/check.mjs
-      - run: node --test test/*.test.js
+      - run: node scripts/test.mjs
       - run: node scripts/build.mjs
       # Preparation only. No deploy-pages action, Pages environment or write permissions.
       - uses: actions/upload-artifact@v4
