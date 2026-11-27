@@ -12,7 +12,7 @@ Node.js 22以上（推奨24）で、プロジェクト内から実行します�
 node scripts/check.mjs
 node scripts/test.mjs
 node scripts/build.mjs
-# 配信対象は dist/ の18ファイル
+# 配信対象は dist/ の計20ファイル（公開許可リスト19ファイルと .nojekyll）
 ```
 
 基本機能先行版の実機検証には、通知開発版から独立したCloudflare Pagesのテストサイトを使用しました。PC内で確認する場合は、`node server.mjs` でビルド済みdistを `http://127.0.0.1:4173/` に表示できます。

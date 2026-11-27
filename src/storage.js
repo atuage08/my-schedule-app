@@ -138,12 +138,13 @@ export class ScheduleStore{
     try{return await this._lock(action);}catch(cause){return {ok:false,committed:false,reason:cause.reason||'blocked',message:messages[cause.reason]||messages.blocked};}
     finally{this.busy=false;}
   }
-  async mutate(action,base=this.token(),{user=true,queueRemovals=false,notificationV3=false}={}){
+  async mutate(action,base=this.token(),{user=true,queueRemovals=false,notificationV3=false,checkBeforeWrite}={}){
     if(this.status!=='ready')return {ok:false,reason:'blocked',message:messages.blocked};
     let raw,draft;
     try{draft=structuredClone(this.state);action(draft);assertBasicMutation(this.state,draft);raw=NOTIFICATIONS_ENABLED&&notificationV3?null:serializeState(draft);}catch(cause){return {ok:false,reason:cause?.code==='notification-protected'?'notification-protected':'validation',message:cause?.code==='notification-protected'?cause.message:'変更を検証できません。入力と保存上限を確認してください'};}
     return this._operation(()=>{
       this._check(base);
+      checkBeforeWrite?.();
       if(NOTIFICATIONS_ENABLED&&notificationV3){try{if(needsV3(this.state,draft))stageV3(this.state,draft,this.state.version===3?[]:readRemovals(this.storage).value.entries);raw=serializeState(draft);}catch{return {ok:false,committed:false,reason:'notification-v3',message:'通知連携情報を検証・保持できないため保存を停止しました'};}}
       if(raw===serializeState(this.state))return {ok:true,committed:false,verified:true};
       let removalPlan=null;

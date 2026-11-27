@@ -23,7 +23,7 @@ try{
   const initial=JSON.parse(localStorage.getItem(STORAGE_KEY));
   verify(!document.querySelector('.backup-reminder'));
   verify(!!document.querySelector('#upgrade-notice'));
-  document.querySelector('[data-view="someday"]').click();verify(!!document.querySelector('#upgrade-notice'));action('‹ ホームに戻る');
+  document.querySelector('[data-view="someday"]').click();verify(!!document.querySelector('#upgrade-notice'));action('← ホームに戻る');
   verify(document.querySelector('#upgrade-confirm').disabled);
   document.querySelector('#upgrade-checked').click();action('確認を記録して案内を閉じる');await wait(()=>!document.querySelector('#upgrade-notice'));
   verify(!document.querySelector('#upgrade-notice'));
@@ -47,7 +47,7 @@ try{
   verify(document.querySelector('#notice').textContent==='タスクを完了しました');
   action('✓ 完了したタスクを見る');document.querySelector('[data-restore]').click();
   await wait(()=>JSON.parse(localStorage.getItem(STORAGE_KEY)).history[0].restoredAt);
-  verify(JSON.parse(localStorage.getItem(STORAGE_KEY)).items.length===initial.items.length);action('‹ ホームに戻る');
+  verify(JSON.parse(localStorage.getItem(STORAGE_KEY)).items.length===initial.items.length);action('← ホームに戻る');
   // Exercise real browser Web Locks, not the deterministic unit-test lock fake.
   const a=new ScheduleStore({storage:localStorage,locks:navigator.locks}),b=new ScheduleStore({storage:localStorage,locks:navigator.locks});
   await a.refresh();await b.refresh();const concurrent=await Promise.all([a.mutate(d=>{d.items[0].title='架空の競合A';}),b.mutate(d=>{d.items[0].title='架空の競合B';})]);

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { buildSite } from '../scripts/build.mjs';
-import { PROJECT_ROOT, PUBLIC_FILES, readSource, reviewFiles } from '../scripts/files.mjs';
+import { PROJECT_ROOT, PUBLIC_FILES, TOUCH_ICON, readSource, reviewFiles } from '../scripts/files.mjs';
 import { screenText } from '../scripts/check.mjs';
 
 async function fixture(t, files = PUBLIC_FILES) {
@@ -65,6 +65,24 @@ test('all HTML and module references resolve under both root and repository Page
       await verify(link, new URL(link, base));
     }
     assert.equal(seen.size, PUBLIC_FILES.length - 1);
+  }
+});
+
+test('brand icon CSS resolves to the packaged PNG under root and repository Pages paths', async t => {
+  const output = await buildSite(await fixture(t));
+  const css = (await readFile(join(output, 'styles.css'), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '');
+  const brandRules = [...css.matchAll(/\.brand-mark\s*\{([^{}]*)\}/g)];
+  const references = brandRules.flatMap(([, declarations]) =>
+    [...declarations.matchAll(/\burl\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)]+))\s*\)/gi)]
+      .map(([, doubleQuoted, singleQuoted, unquoted]) => doubleQuoted ?? singleQuoted ?? unquoted));
+  assert.ok(references.length > 0, 'brand icon must reference an image');
+  assert.ok(PUBLIC_FILES.includes(TOUCH_ICON));
+  assert.deepEqual(await readFile(join(output, TOUCH_ICON)), await readSource(PROJECT_ROOT, TOUCH_ICON));
+  for (const base of ['https://example.invalid/', 'https://example.invalid/my-schedule-app/']) {
+    const stylesheet = new URL('styles.css', base);
+    for (const reference of references) {
+      assert.equal(new URL(reference, stylesheet).href, new URL(TOUCH_ICON, base).href);
+    }
   }
 });
 
