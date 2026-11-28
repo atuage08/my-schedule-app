@@ -491,6 +491,28 @@ try{
     document.activeElement===document.querySelector('#batch-keep')`,returnByValue:true},sessionId);
   if(escape.result?.value!==true)throw Error('Escape should ask before discarding the import draft');
   console.log('Batch import at 320/390/430px, 200% text and keyboard checks passed: '+JSON.stringify(batchSetup.result.value));
+
+  for(const [timezoneId,day,skippedDay] of [['Pacific/Apia','2011-12-29',true],['America/New_York','2027-03-12',false]]){
+    const {browserContextId}=await command('Target.createBrowserContext');
+    try{
+      const {targetId}=await command('Target.createTarget',{url:'about:blank',browserContextId});
+      const {sessionId}=await command('Target.attachToTarget',{targetId,flatten:true});
+      await command('Page.enable',{},sessionId);
+      await command('Emulation.setTimezoneOverride',{timezoneId},sessionId);
+      await command('Page.addScriptToEvaluateOnNewDocument',{source:`{
+        const Clock=Date,now=new Clock(${JSON.stringify(day+'T12:00:00')}).getTime();
+        globalThis.Date=class extends Clock{
+          constructor(...args){super(...(args.length?args:[now]));}
+          static now(){return now;}
+        };
+      }`},sessionId);
+      await command('Page.navigate',{url:url+'index.html'},sessionId);
+      const result=await command('Runtime.evaluate',{expression:`import('/test/fixtures/browser-batch-import.js').then(
+        fixture=>fixture.checkImportedAllDayEdit(${JSON.stringify(day)},${skippedDay}))`,awaitPromise:true,returnByValue:true},sessionId);
+      if(result.result?.value!==true)throw Error(timezoneId+' all-day round trip failed: '+(result.exceptionDetails?.exception?.description||result.exceptionDetails?.text));
+      console.log(timezoneId+' imported all-day editor round trip passed');
+    }finally{await command('Target.disposeBrowserContext',{browserContextId});}
+  }
 }finally{
   socket?.close();
   server.close();

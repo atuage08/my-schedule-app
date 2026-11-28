@@ -4,6 +4,83 @@ const task=(title,due=null,repeat='none')=>({type:'task',title,due,repeat});
 const event=(title,start,end)=>({type:'event',title,allDay:false,start,end,repeat:'none'});
 const encode=items=>JSON.stringify({format:'my-schedule-import',formatVersion:1,items},null,2);
 
+export async function checkImportedAllDayEdit(day,skippedDay){
+  const $=selector=>document.querySelector(selector);
+  const saved=()=>JSON.parse(localStorage.getItem(STORAGE_KEY)).items;
+  const when=async(predicate,message)=>{
+    for(let attempt=0;attempt<200;attempt++){
+      if(predicate())return;
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    throw Error(message);
+  };
+  const assert=(condition,message)=>{if(!condition)throw Error(message);};
+  const dateButton=date=>$('[data-day="'+date+'"]');
+  const row=id=>$('.agenda [data-edit="'+id+'"]');
+  const ready=()=>$('#schedule-calendar')?.dataset.calendarStatus==='ready';
+  const title='架空の終日取り込み',weeklyTitle='架空の毎週終日取り込み';
+  const last=skippedDay?day:'2027-03-14',exclusive=skippedDay?'2011-12-31':'2027-03-15';
+  const input=(title,repeat)=>({type:'event',title,allDay:true,startDate:day,endDate:last,repeat});
+  const expected=(item,start=day,end=exclusive)=>item?.allDay&&item.start===start+'T00:00'&&item.end===end+'T00:00';
+
+  await when(()=>ready()&&$('#add:not(:disabled)'),'Calendar did not open');
+  $('#add').click();$('#batch-open').click();
+  const json=$('#batch-json');
+  json.value=encode(skippedDay?[input(title,'none')]:[input(title,'none'),input(weeklyTitle,'weekly')]);
+  json.dispatchEvent(new Event('input',{bubbles:true}));
+  $('#batch-parse').click();$('#batch-review').click();
+  assert($('.batch-content').textContent.includes('開始日：'+day+' ／ 最終日：'+last),'Imported all-day range was not confirmed');
+  $('#batch-save').click();
+  await when(()=>$('#batch-import').dataset.stage==='done','Import did not complete');
+  $('#batch-done').click();$('#close').click();
+  const imported=saved().find(item=>item.title===title);
+  assert(expected(imported),'Imported timestamps differ from the expected exclusive range');
+  assert(dateButton(day),'Expected first day is outside the calendar grid');
+  dateButton(day).click();
+  assert(row(imported.id),'Imported event was not shown on its first day: '+$('.agenda').textContent);
+
+  const saveEdit=async()=>{
+    $('#entry-form').requestSubmit();
+    await when(()=>!$('#editor').open,'Edit did not save: '+($('#form-error').textContent||'no form error'));
+  };
+  const agendaText=row(imported.id).textContent;
+  row(imported.id).click();
+  let fields=$('#entry-form').elements;
+  assert(fields.start.value===day&&fields.end.value===last,'Editor showed '+fields.start.value+' to '+fields.end.value+'; expected '+day+' to '+last);
+  if(skippedDay)assert(agendaText.includes('12/29まで'),'The selected-day list showed the wrong last day: '+agendaText);
+  fields.title.value=title+'の名称変更';
+  await saveEdit();
+  let updated=saved().find(item=>item.id===imported.id);
+  assert(updated.title===title+'の名称変更'&&expected(updated),'A title-only edit changed the all-day range');
+
+  if(skippedDay){
+    await when(()=>ready()&&dateButton('2011-12-31'),'Calendar did not render December 31');
+    assert(!dateButton('2011-12-31').getAttribute('aria-label').includes(title),'The calendar counted the event on December 31');
+    dateButton('2011-12-31').click();
+    assert(!row(imported.id),'The selected-day list showed the event on December 31');
+  }else{
+    row(imported.id).click();
+    fields=$('#entry-form').elements;
+    fields.start.value='2027-03-13';fields.start.dispatchEvent(new Event('change',{bubbles:true}));
+    fields.end.value='2027-03-16';
+    await saveEdit();
+    updated=saved().find(item=>item.id===imported.id);
+    assert(expected(updated,'2027-03-13','2027-03-17'),'Intentional all-day date changes were not saved');
+
+    const weekly=saved().find(item=>item.title===weeklyTitle);
+    row(weekly.id).click();
+    fields=$('#entry-form').elements;
+    assert(fields.start.value===day&&fields.end.value===last&&fields.scope.value==='one','Weekly occurrence opened with incorrect dates or scope');
+    fields.title.value=weeklyTitle+'の今回だけ変更';
+    await saveEdit();
+    const items=saved(),series=items.find(item=>item.id===weekly.id);
+    const exception=items.find(item=>item.eventSeriesId===weekly.id&&item.exceptionDate===day);
+    assert(expected(series)&&series.repeat==='weekly'&&series.excluded.includes(day),'The weekly series range changed');
+    assert(expected(exception)&&exception.exceptionDate===day&&exception.title===weeklyTitle+'の今回だけ変更','The edited occurrence did not retain its exact dates');
+  }
+  return true;
+}
+
 export async function checkBatchImport({verify,wait,today}){
   const $=selector=>document.querySelector(selector);
   const click=id=>$('#'+id).click();

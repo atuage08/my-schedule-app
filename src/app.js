@@ -10,7 +10,7 @@ import {ScheduleStore,META_KEY} from './storage.js';
 import {createBackupUI} from './backup-ui.js';
 import {createBatchImportUI} from './batch-import-ui.js';
 import {UpgradeNotice,UPGRADE_KEY} from './upgrade-notice.js';
-import {notificationSettings,notificationFromLocal,stamp,MIN_DATE,MAX_DATE,MAX_EVENT_END,REPEATS,createCalendarSummaryRequests,validDate,deletionPlan,editEventOccurrence,clampDate,dueGroups,restore,removeItem,newId,STORAGE_KEY,dateKey,localDate,addDays,defaults,shiftEnd,validateItem,rollTasks,taskRecurrences,complete,agendaPage,eventOccurrence} from './model.js';
+import {notificationSettings,notificationFromLocal,stamp,MIN_DATE,MAX_DATE,MAX_EVENT_END,REPEATS,createCalendarSummaryRequests,validDate,deletionPlan,editEventOccurrence,clampDate,dueGroups,restore,removeItem,newId,STORAGE_KEY,dateKey,localDate,addDays,previousLocalDate,defaults,shiftEnd,validateItem,rollTasks,taskRecurrences,complete,agendaPage,eventOccurrence} from './model.js';
 const {h,replace}=createDom(document),$=selector=>document.querySelector(selector);
 const fmt=(date,options={month:'long',day:'numeric',weekday:'short'})=>localDate(date).toLocaleDateString('ja-JP',options);
 const storage={getItem:key=>localStorage.getItem(key),setItem:(key,value)=>localStorage.setItem(key,value)};
@@ -200,7 +200,7 @@ function eventRow(event){
   const time=event.allDay?'終日':event.start.slice(0,10)<selected?'継続中':event.start.slice(11);
   const end=event.allDay?'':event.end.slice(0,10)>selected?'翌日以降まで':event.end.slice(11);
   let subtitle=event.allDay?'日付だけの予定':event.repeat!=='none'?REPEATS[event.repeat]:'自分の時間';
-  if(event.end.slice(0,10)>event.start.slice(0,10))subtitle+=' · '+fmt(event.allDay?addDays(event.end.slice(0,10),-1):event.end.slice(0,10),{month:'numeric',day:'numeric'})+'まで';
+  if(event.end.slice(0,10)>event.start.slice(0,10))subtitle+=' · '+fmt(event.allDay?previousLocalDate(event.end.slice(0,10)):event.end.slice(0,10),{month:'numeric',day:'numeric'})+'まで';
   if(isProtectedItem(state,event))subtitle+=' · 保護中（閲覧のみ）';
   return h('button',{class:'event','data-edit':event.id,'data-occurrence':event.exceptionDate??event.occurrence},h('div',{class:'event-time'},time,h('small',{},end)),h('div',{class:'event-body'},h('strong',{},event.title),h('small',{},subtitle)),h('span',{},'›'));
 }
@@ -355,7 +355,7 @@ function openEditor(original=null,occurrence=null){
   function draw(){
     const input=(name,value,attributes={})=>h('input',{name,value,...attributes});
     const select=(name,options)=>h('select',{name},options.map(([value,label,selected])=>h('option',{value,selected},label)));
-    const dateInput=name=>input(name,data.allDay?(name==='end'?addDays(data.end.slice(0,10),data.end.slice(11)==='00:00'?-1:0):data.start.slice(0,10)):data[name],{type:data.allDay?'date':'datetime-local',step:data.allDay?1:600,min:MIN_DATE+(data.allDay?'':'T00:00'),max:data.allDay?MAX_DATE:name==='end'?MAX_EVENT_END:MAX_DATE+'T23:59',required:true});
+    const dateInput=name=>input(name,data.allDay?(name==='end'?previousLocalDate(data.end.slice(0,10)):data.start.slice(0,10)):data[name],{type:data.allDay?'date':'datetime-local',step:data.allDay?1:600,min:MIN_DATE+(data.allDay?'':'T00:00'),max:data.allDay?MAX_DATE:name==='end'?MAX_EVENT_END:MAX_DATE+'T23:59',required:true});
     const fields=type==='event'?[h('label',{class:'toggle-row'},'終日',h('input',{name:'allDay',type:'checkbox',checked:data.allDay})),h('label',{},'開始',dateInput('start')),h('label',{},'終了',dateInput('end')),hint(data.allDay?'終了日を含みます':'24時間表記 · 通常は10分単位')]:[h('label',{},'期限 ',h('span',{class:'optional'},'任意'),input('due',data.due||'',{type:'date',min:MIN_DATE,max:MAX_DATE})),hint('名称だけでも保存できます。期限なしは「いつかやる」へ。')];
     const repeat=select('repeat',Object.entries(REPEATS).filter(([key])=>!data.exceptionDate||key==='none').map(([key,label])=>[key,label,data.repeat===key]));
     const details=h('details',{},h('summary',{},'詳細設定'),h('label',{},'繰り返し',repeat),type==='event'&&h('label',{class:'toggle-row'},'1分単位で入力',h('input',{type:'checkbox',id:'minute-step'})),hint('毎月・毎年は基準日を維持し、存在しない日は月末にします。日付は2000〜2100年、予定は最大366日間です。'));
@@ -385,7 +385,14 @@ function openEditor(original=null,occurrence=null){
       if(supportsNotification){const setting=notificationFromLocal($('#event-notify-enabled').checked,$('#event-notify-at').value,original?.notification);if(setting.enabled||data.notification!==undefined)data.notification=setting;}
       if(type!=='event'||data.repeat!=='none'){if(data.notification?.enabled)throw Error('先に通知を解除し、Apple側のリマインダーも確認してください');delete data.notification;}
       if(type==='task')data.due=values.get('due')||null;
-      else{data.allDay=form.elements.start.type==='date';data.start=values.get('start')+(data.allDay?'T00:00':'');data.end=data.allDay?addDays(values.get('end'),1)+'T00:00':values.get('end');}
+      else{
+        data.allDay=form.elements.start.type==='date';
+        const start=values.get('start'),end=values.get('end');
+        if(data.allDay){
+          data.start=start+'T00:00';
+          if(end!==previousLocalDate(data.end.slice(0,10)))data.end=addDays(end,1)+'T00:00';
+        }else{data.start=start;data.end=end;}
+      }
     }
     if($('#event-notify-enabled'))$('#event-notify-enabled').onchange=()=>{$('#event-notify-at').disabled=!$('#event-notify-enabled').checked;};
     $('#close').onclick=()=>dialog.close();

@@ -165,6 +165,8 @@ try{
     const overlapping={id:'overlapping-event',type:'event',title:'架空の重複する連日予定',allDay:false,
       start:oldest+'T10:00',end:nextDayAfterOverlap+'T10:00',repeat:'daily',anchorDay:31,anchorMonth:1,excluded:[]};
     const withOverlap=saved();
+    // Keep the weekday-dependent series and its exceptions out of the next fixture.
+    withOverlap.items=withOverlap.items.filter(item=>item.id!==series.id&&item.eventSeriesId!==series.id);
     const boundaries=[['min-event','2000-01-01'],['max-event','2100-12-31']];
     withOverlap.items.push(overlapping,...boundaries.map(([id,day])=>({
       id,type:'event',title:'架空の範囲端の予定',start:day+'T10:00',end:id==='max-event'?'2101-01-01T00:00':day+'T11:00',allDay:false,repeat:'none',excluded:[]

@@ -25,6 +25,12 @@ export function addDays(key, n) {
   if (!Number.isInteger(n) || Math.abs(n) > 40000) throw Error('日数が範囲外です');
   const d = localDate(key); d.setDate(d.getDate()+n); return dateKey(d);
 }
+export function previousLocalDate(key) {
+  let day=ordinal(key)-1;
+  // A skipped civil date must not normalize forward to the exclusive end.
+  while(!realDate(calendarDate(day)))day--;
+  return calendarDate(day);
+}
 export function newId(cryptoApi = globalThis.crypto) {
   if (typeof cryptoApi.randomUUID === 'function') return cryptoApi.randomUUID();
   return Array.from(cryptoApi.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2,'0')).join('');
