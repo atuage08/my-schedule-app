@@ -8,6 +8,7 @@ export async function runBrowserSmoke(tab) {
   const page=tab.playwright, checks=[];
   const verify=(label,condition)=>{assert.ok(condition,label);checks.push(label);};
   const button=name=>page.getByRole('button',{name,exact:true});
+  const home=page.locator('button[data-view="home"]');
   const editor=page.locator('#editor');
   const title=`架空ブラウザ試験-${Date.now()}`;
   const cards=name=>page.locator('.event').filter({hasText:name});
@@ -20,26 +21,30 @@ export async function runBrowserSmoke(tab) {
     if(exceptionCount!==null)verify('確認画面に関連する例外の件数を表示',(await confirm.innerText({})).includes(`関連する例外予定 ${exceptionCount} 件`));
     await confirm.getByRole('button',{name:cancel?'キャンセル':'削除する',exact:true}).click();
   };
-  if(await button('‹ ホームに戻る').count())await button('‹ ホームに戻る').click();
+  if(await home.count())await home.click();
   await button('今日へ ↗').click();await open();
   await editor.getByPlaceholder('どんな予定？').fill(title);
   const date=await editor.getByLabel('開始日',{exact:true}).evaluate(el=>el.value);
   const hour=editor.getByLabel('開始時（24時間）',{exact:true});
-  verify('時が数値入力',await hour.getAttribute('type')==='number');
-  await hour.fill('24');await button('保存する ✓').click();
-  verify('24時を拒否して未保存',await editor.isVisible()&&await cards(title).count()===0);
-  await hour.fill('0');await hour.press('Tab');
+  verify('時は00〜23時から選択',await hour.evaluate(el=>el.tagName==='SELECT'&&
+    [...el.options].every((option,index)=>option.value===String(index).padStart(2,'0'))&&el.options.length===24));
+  await hour.selectOption('00');
   await details();
   await editor.getByLabel('1分単位で入力',{exact:true}).check();
   await editor.getByLabel('開始分',{exact:true}).selectOption('07');
-  verify('0時7分の入力と終了連動',await hour.evaluate(el=>el.value)==='0'&&await editor.getByLabel('終了時（24時間）',{exact:true}).evaluate(el=>el.value)==='1'&&await editor.getByLabel('終了分',{exact:true}).evaluate(el=>el.value)==='07');
+  verify('0時7分の入力と終了連動',await hour.evaluate(el=>el.value)==='00'&&await editor.getByLabel('終了時（24時間）',{exact:true}).evaluate(el=>el.value)==='01'&&await editor.getByLabel('終了分',{exact:true}).evaluate(el=>el.value)==='07');
   await editor.locator('select[name="repeat"]').selectOption('biweekly');
   await button('保存する ✓').click();verify('予定を登録',await cards(title).count()===1);
   const markerTask=title+'印';
   await open();await button('タスク').click();await editor.getByPlaceholder('やることをひとつ').fill(markerTask);
   await editor.locator('input[name="due"]').fill(date);await button('保存する ✓').click();
   const dayButton=page.locator(`[data-day="${date}"]`);
-  const checkMarks=async(label)=>verify(label,await dayButton.locator('.event-mark').count()===1&&await dayButton.locator('.task-mark').count()===1&&(await dayButton.getAttribute('aria-label')).includes('期限付きタスクあり'));
+  const checkMarks=async(label)=>{
+    for(let i=0;i<100&&await page.locator('[data-calendar-status="loading"]').count();i++)
+      await new Promise(resolve=>setTimeout(resolve,20));
+    verify(label,await dayButton.locator('.event-mark').count()===1&&await dayButton.locator('.task-mark').count()===1&&
+      (await dayButton.getAttribute('aria-label')).includes('期限付きタスクあり'));
+  };
   await checkMarks('週表示で丸と四角を両方表示');
   await page.locator('[data-mode="month"]').click();await checkMarks('月表示でも丸と四角を両方表示');
   await page.locator('[data-mode="week"]').click();
@@ -69,7 +74,7 @@ export async function runBrowserSmoke(tab) {
   await history.getByRole('button',{name:'未完了に戻す',exact:true}).click();
   verify('履歴を残して完了を取り消す',(await history.innerText({})).includes('完了取り消し済み'));
   verify('二重復元ボタンがない',await history.getByRole('button',{name:'未完了に戻す',exact:true}).count()===0);
-  await button('‹ ホームに戻る').click();
+  await home.click();
   const taskCard=page.locator('.task-row').filter({hasText:taskTitle});
   verify('復元後も未完了は1件',await taskCard.count()===1);
   await taskCard.locator('.item-title').click();await editor.locator('select[name="scope"]').selectOption('all');await confirmDelete('シリーズ全体');
@@ -77,13 +82,13 @@ export async function runBrowserSmoke(tab) {
   const singleTitle=title+'期限なし';
   await open();await button('タスク').click();await editor.getByPlaceholder('やることをひとつ').fill(singleTitle);await button('保存する ✓').click();
   await page.locator('[data-view="someday"]').click();await button(singleTitle+'を完了').click();
-  await button('‹ ホームに戻る').click();await button('✓ 完了したタスクを見る').click();
+  await home.click();await button('✓ 完了したタスクを見る').click();
   await page.locator('.history-row').filter({hasText:singleTitle}).getByRole('button',{name:'未完了に戻す',exact:true}).click();
-  await button('‹ ホームに戻る').click();await page.locator('[data-view="someday"]').click();
+  await home.click();await page.locator('[data-view="someday"]').click();
   verify('期限なしタスクを復元',await button(singleTitle).count()===1);
-  await button(singleTitle).click();await confirmDelete('この項目だけ');await button('‹ ホームに戻る').click();
+  await button(singleTitle).click();await confirmDelete('この項目だけ');await home.click();
   await page.locator('[data-view="due"]').click();
   verify('全件一覧は4グループ',JSON.stringify(await page.locator('.tasks h3').allTextContents({}))===JSON.stringify(['期限超過','今日','今後7日以内','それ以降']));
-  await button('‹ ホームに戻る').click();
+  await home.click();
   return {passed:checks.length,checks};
 }

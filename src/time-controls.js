@@ -1,6 +1,12 @@
-import { MIN_DATE, MAX_DATE } from './model.js';
-// Hours use direct numeric input; minutes remain a compact selector.
+import { MIN_DATE, MAX_DATE, MAX_EVENT_END } from './model.js';
 const padded = n => String(n).padStart(2, '0');
+
+function timeOption(n, unit) {
+  const option = document.createElement('option');
+  option.value = padded(n);
+  option.textContent = option.value + unit;
+  return option;
+}
 
 // A date-only value is a calendar day, not an instant in the device time zone.
 export function dateHint(value) {
@@ -54,46 +60,48 @@ export function enhanceTimeFields(form) {
     const date = document.createElement('input');
     date.type = 'date';
     date.min = MIN_DATE;
-    date.max = MAX_DATE;
+    date.max = name==='end'?MAX_EVENT_END.slice(0,10):MAX_DATE;
     date.required = true;
     date.setAttribute('aria-label', label + '日');
-    const hour = document.createElement('input');
-    hour.type = 'number';
-    hour.min = '0';
-    hour.max = '23';
-    hour.step = '1';
+    const hour = document.createElement('select');
     hour.required = true;
-    hour.inputMode = 'numeric';
     hour.setAttribute('aria-label', label + '時（24時間）');
+    hour.append(...Array.from({length: 24}, (_, n) => timeOption(n, '時')));
     const minute = document.createElement('select');
     minute.setAttribute('aria-label', label + '分');
     source.type = 'hidden';
     source.before(group);
     group.append(date, hour, minute);
 
+    const checkEnd = value => {
+      const allowed = name!=='end'||value<=MAX_EVENT_END;
+      date.setCustomValidity(allowed?'':'2101年1月1日の終了時刻は00:00のみ指定できます。');
+      return allowed;
+    };
     const refresh = () => {
       const value = source.value;
       date.value = value.slice(0, 10);
+      checkEnd(value);
       refreshDateHint(date);
-      hour.value = String(Number(value.slice(11, 13)));
+      hour.value = value.slice(11, 13);
       const current = Number(value.slice(-2));
       const minutes = Array.from({length: precise ? 60 : 6}, (_, i) => i * (precise ? 1 : 10));
       if (!minutes.includes(current)) minutes.push(current);
       minutes.sort((a, b) => a - b);
-      minute.replaceChildren(...minutes.map(n=>{
-        const option=document.createElement('option');
-        option.value=padded(n);option.textContent=padded(n)+'分';return option;
-      }));
+      minute.replaceChildren(...minutes.map(n => timeOption(n, '分')));
       minute.value = padded(current);
     };
     const change = () => {
+      date.setCustomValidity('');
       if (!date.validity.valid || !hour.validity.valid) return;
-      source.value = date.value + 'T' + padded(Number(hour.value)) + ':' + minute.value;
+      const value = date.value + 'T' + hour.value + ':' + minute.value;
+      if (!checkEnd(value)) return;
+      if (value === source.value) return;
+      source.value = value;
       source.onchange?.();
       controls.forEach(update => update());
     };
     for (const control of [date, hour, minute]) control.onchange = change;
-    hour.oninput = change;
     controls.push(refresh);
     refresh();
   }
